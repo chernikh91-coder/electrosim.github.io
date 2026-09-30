@@ -23,15 +23,21 @@ const wireDefaults = { shape:'smooth', color:'#1c1c1c' };
 /* обозначения аппаратов на стенде */
 const TAGS = { klemma:'XN', pebus:'XPE', mcb3:'QF1', mcb1:'QF2', rcd:'QD1', meter:'PI1', sensor:'PVA1', lamp:'HL1', bulb:'EL1', outlet:'XS1', wallSwitch:'SA1', twoWaySwitch:'SA1', fridge:'E1', washer:'E1', boiler:'E1', stove:'E1', vfd:'UZ1', tp:'UZT1', km1:'KM1', kk1:'KK1', timer:'KT1', M1:'M1', IN:'XT1', PB:'SB1–SB3' };
 const TAG_PREFIX = { klemma:'XN', pebus:'XPE', mcb3:'QF', mcb1:'QF', rcd:'QD', meter:'PI', sensor:'PVA', lamp:'HL', bulb:'EL', outlet:'XS', wallSwitch:'SA', twoWaySwitch:'SA', fridge:'E', washer:'E', boiler:'E', stove:'E', vfd:'UZ', tp:'UZT', km1:'KM', kk1:'KK', timer:'KT' };
-/* клеммная коробка ввода (отдельно стоящая, слева сверху): болты окрашены
+/* клеммная коробка ввода (в исходном щите, слева сверху): болты окрашены
    в цвета подходящих проводов — L1 красный, L2 жёлтый, L3 зелёный, N синий, PE жёлто-зелёный */
-const INBOX = { x:90, y:-194, w:360, h:120 };
+const INBOX = { x:90, y:-194, w:240, h:120 };
 const INBOX_TERMS = [
   { key:'L1', label:'L1', dx:40,  dy:100, color:WCF.L1, tc:'#c62828' },
-  { key:'L2', label:'L2', dx:110, dy:100, color:WCF.L2, tc:'#9c7800' },
-  { key:'L3', label:'L3', dx:180, dy:100, color:WCF.L3, tc:'#1b7f31' },
-  { key:'N',  label:'N',  dx:250, dy:100, color:WCF.N,  tc:'#2a6fd6' },
-  { key:'PE', label:'PE', dx:320, dy:100, color:WCF.PE, tc:'#5f7a00' }
+  { key:'L2', label:'L2', dx:80,  dy:100, color:WCF.L2, tc:'#9c7800' },
+  { key:'L3', label:'L3', dx:120, dy:100, color:WCF.L3, tc:'#1b7f31' },
+  { key:'N',  label:'N',  dx:160, dy:100, color:WCF.N,  tc:'#2a6fd6' },
+  { key:'PE', label:'PE', dx:200, dy:100, color:WCF.PE, tc:'#5f7a00' }
+];
+const INBOX_SINGLE_TERMS = [
+  // Ключ L1 сохраняет подключение первой фазы при переключении типа ввода.
+  { key:'L1', label:'L', dx:50, dy:100, color:WC.L1, tc:WC.L1 },
+  { key:'N', label:'N', dx:90, dy:100, color:WCF.N, tc:'#2a6fd6' },
+  { key:'PE', label:'PE', dx:130, dy:100, color:WCF.PE, tc:'#5f7a00' }
 ];
 
 /* ============================================================
@@ -48,6 +54,7 @@ const TYPES = {
   lamp:   { title:'Сигнальная лампа HL1, зелёная, 220 В', modules:1, h:82*MM, kind:'lamp' },
   bulb:   { title:'Лампа накаливания EL1, 220 В / 100 Вт', modules:2, h:60*MM, kind:'bulb', freeOnly:true },
   outlet: { title:'Двойная розетка XS1, 220 В', modules:4, h:60*MM, kind:'outlet', freeOnly:true },
+  junction:{ title:'Разветвительная коробка', modules:4, h:70*MM, kind:'junction', freeOnly:true },
   wallSwitch:{ title:'Выключатель освещения SA1', modules:3, h:60*MM, kind:'wallSwitch', freeOnly:true },
   twoWaySwitch:{ title:'Проходной выключатель SA', modules:3, h:60*MM, kind:'twoWaySwitch', freeOnly:true },
   fridge: { title:'Холодильник', modules:3, h:60*MM, kind:'appliance', freeOnly:true, defaultPower:300 },
@@ -61,7 +68,9 @@ const TYPES = {
   kk1:    { title:'Тепловое реле KK1',    modules:3, h:74*MM, kind:'relay', over:PIN_TOP }
 };
 const STOCK = { klemma:1, pebus:1, mcb3:1, mcb1:1, rcd:1, meter:1, sensor:1, lamp:3, bulb:1, outlet:1, wallSwitch:1, twoWaySwitch:1, fridge:1, washer:1, boiler:1, stove:1, vfd:1, tp:1, timer:1, km1:2, kk1:2 };
+STOCK.junction=1;TAGS.junction='XR1';TAG_PREFIX.junction='XR';
 const KIND_RU = { mcb:'автоматический выключатель', terminal:'клеммная шина: все зажимы соединены внутри',
+                  junction:'открытая коробка: 4 независимые колодки по 3 клеммы',
                   rcd:'УЗО: двухполюсное отключение фазы и нуля, TEST 30 мА',
                   meter:'однофазный счётчик: 1–2 фаза, 3–4 нейтраль, учёт кВт·ч',
                   sensor:'измеритель напряжения и тока с проходными L и N',
@@ -117,6 +126,17 @@ function ratedVoltageOf(obj,fallback){
   const value=Number(obj&&obj.ratedVoltage);
   return isFinite(value)&&value>0?value:(fallback||220);
 }
+/* Бытовые нагрузки в текущей модели имеют cos φ = 1: P = U·I, R = U²/P.
+   Храним согласованные номиналы без округления тока до десятых. */
+function applianceRatings(obj,changedKey){
+  const type=TYPES[obj.type],voltage=ratedVoltageOf(obj,220);
+  const savedPower=Number(obj.ratedPower),savedCurrent=Number(obj.ratedCurrent);
+  const hasPower=isFinite(savedPower)&&savedPower>0,hasCurrent=isFinite(savedCurrent)&&savedCurrent>0;
+  const power=(changedKey==='ratedCurrent'&&hasCurrent)||(!hasPower&&hasCurrent)
+    ?voltage*savedCurrent:(hasPower?savedPower:type.defaultPower);
+  return {ratedVoltage:voltage,ratedPower:power,ratedCurrent:power/voltage};
+}
+function syncApplianceRatings(obj,changedKey){Object.assign(obj,applianceRatings(obj,changedKey));}
 function voltageRatio(voltage,obj,fallback){return Math.max(0,Number(voltage)||0)/ratedVoltageOf(obj,fallback);}
 function voltageIsOperating(voltage,obj,fallback){const ratio=voltageRatio(voltage,obj,fallback);return ratio>=.8&&ratio<=1.18;}
 function voltageIsDestructive(voltage,obj,fallback){return voltageRatio(voltage,obj,fallback)>1.27;}
@@ -127,7 +147,7 @@ function voltageBrightness(voltage,obj,fallback){
 
 const state = { power:false, devices:[], relays:[], wires:[], nextId:1,
                 pb:{ up:false, stop:false, down:false },
-                 motors:[], pushbuttons:[],
+                 motors:[], pushbuttons:[], clamps:[], panels:[], standaloneRails:false,
                 mm:{ mode:false, fn:'voltage', a:null, b:null },
                 specialProps:{inbox:{tag:'XT1',customName:'Ввод 3×380 В',ratedVoltage:380,frequency:50},multimeter:{tag:'PV1',customName:'Цифровой мультиметр'}},
                 special:{ inbox:true, pushbutton:false, motor:false, multimeter:true } };
@@ -135,14 +155,14 @@ let terminalGuidesEnabled = false;
 const METER = { x:875, y:1080, w:230, h:330,
                 redX:1033, redY:1022, blackX:947, blackY:1022 };
 
-/* Исходное состояние: пустое монтажное поле с двумя DIN-рейками.
-   На сцене остаётся только ввод XT1; все аппараты находятся в лотке. */
+/* Исходное состояние: монтажный щит со встроенным вводом XT1 и двумя DIN-рейками.
+   Все аппараты находятся в лотке. */
 function initialState(){
   state.power = true;                // сеть на вводе XT1 уже есть — можно мерить мультиметром
   state.devices = [
     { id:1, type:'klemma', rail:0, slot:8, on:false, tripped:false, coil:false },  // XN — справа от QF2, как на образце
-    { id:2, type:'mcb3',   rail:0, slot:2, on:false, tripped:false, coil:false },  // QF1
-    { id:3, type:'mcb1',   rail:0, slot:6, on:false, tripped:false, coil:false },  // QF2 (цепь управления 220 В)
+    { id:2, type:'mcb3',   rail:0, slot:2, on:false, tripped:false, coil:false, breakerType:'C25' },  // QF1
+    { id:3, type:'mcb1',   rail:0, slot:6, on:false, tripped:false, coil:false, breakerType:'C10' },  // QF2 (цепь управления 220 В)
     { id:4, type:'km1',    rail:1, slot:2, on:false, tripped:false, coil:false },  // KM1
     { id:6, type:'lamp',   rail:0, slot:10, on:false, tripped:false, coil:false, indicator:'green',  tag:'HL1' },
     { id:7, type:'km1',    rail:1, slot:6, on:false, tripped:false, coil:false },  // KM2 — независимый реверсивный пускатель
@@ -167,8 +187,7 @@ function initialState(){
     { id:10, a:{ devId:1, key:'k3' },    b:{ devId:4, key:'A2' } },   // с нулевой колодки → катушка A2
     { id:11, a:{ devId:'IN', key:'PE' }, b:{ devId:11,key:'k0' } }    // защитный проводник → шина XPE
   ];
-  // Новый запуск начинается с чистого монтажного поля: на сцене остаются
-  // только две DIN-рейки и вводная клеммная коробка XT1.
+  // Новый запуск начинается с ввода XT1 и щита в верхней левой части поля.
   state.devices = [];
   state.relays = [];
   state.wires = [];
@@ -176,8 +195,13 @@ function initialState(){
   state.pb = { up:false, stop:false, down:false };
   state.motors = [];
   state.pushbuttons = [];
+  state.clamps = [];
+  state.panels = [{id:'PN1',tag:'ЩР1',railCount:2,x:24,y:-176,inbox:true,inletVoltage:380}];
+  state.standaloneRails = false;
+  clampState=null;
   state.specialProps = {inbox:{tag:'XT1',customName:'Ввод 3×380 В',ratedVoltage:380,frequency:50},multimeter:{tag:'PV1',customName:'Цифровой мультиметр'}};
   state.special = { inbox:true, pushbutton:false, motor:false, multimeter:false };
+  syncPanelInbox();
   state.nextId = 1;
   wireSeq = 1;
 METER.x=875;METER.y=1080;METER.redX=1033;METER.redY=1022;METER.blackX=947;METER.blackY=1022;
@@ -204,6 +228,7 @@ function caseScrew(cx, cy, r){
 function mcbInner(type, o){
   const t = TYPES[type], w = t.modules*MODULE, h = t.h, poles = t.poles, poleW = w/poles;
   const on = !!o.on, tripped = !!o.tripped;
+  const displayedRating = (type==='mcb1'||type==='mcb3') ? (o.breakerType || t.rating) : t.rating;
   let s = '';
 
   // корпус
@@ -224,7 +249,7 @@ function mcbInner(type, o){
   const st = 38, sh = 74;
   s += '<rect x="6" y="'+st+'" width="'+(w-12)+'" height="'+sh+'" rx="3" fill="#fcfcfa" stroke="#d8dbdf"/>';
   s += '<text x="'+(w/2)+'" y="'+(st+22)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#1b3a6b" font-family="Segoe UI,Arial">'+(o.tag||'QF')+'</text>';
-  s += '<text x="'+(w/2)+'" y="'+(st+52)+'" text-anchor="middle" font-size="15" font-weight="700" fill="#c62828" font-family="Segoe UI,Arial">'+t.rating+'</text>';
+  s += '<text x="'+(w/2)+'" y="'+(st+52)+'" text-anchor="middle" font-size="15" font-weight="700" fill="#c62828" font-family="Segoe UI,Arial">'+displayedRating+'</text>';
   s += '<text x="'+(w/2)+'" y="'+(st+66)+'" text-anchor="middle" font-size="8" fill="#5b6470" font-family="Segoe UI,Arial">'
      + (poles===3 ? '3P  380В~' : '1P  230В~') + '</text>';
 
@@ -1016,6 +1041,58 @@ function tpInner(o){
   return s;
 }
 
+/* Открытая коробка: четыре кабельных ввода и четыре отдельные шины. */
+function junctionTerms(){
+  const w=TYPES.junction.modules*MODULE,h=TYPES.junction.h,out=[];
+  const rows=[['top',[.35,.5,.65].map(function(p){return {x:w*p,y:38};})],
+    ['right',[.35,.5,.65].map(function(p){return {x:w-38,y:h*p};})],
+    ['bottom',[.35,.5,.65].map(function(p){return {x:w*p,y:h-38};})],
+    ['left',[.35,.5,.65].map(function(p){return {x:38,y:h*p};})]];
+  rows.forEach(function(row,side){row[1].forEach(function(p,i){
+    const number=side*3+i+1;
+    out.push({key:row[0]+i,label:String(number)+' · колодка '+(side+1),dx:p.x,dy:p.y,color:WC.C,hitR:10,side:row[0],number:number});
+  });});
+  return out;
+}
+function junctionInner(o){
+  const w=TYPES.junction.modules*MODULE,h=TYPES.junction.h;
+  let s='';
+  // Ступенчатые серые вводы остаются в пределах габаритов объекта.
+  function entry(x,y,angle){
+    return '<g transform="translate('+x+','+y+') rotate('+angle+')">'
+      +'<rect x="-17" y="-14" width="34" height="14" rx="4" fill="#c5cbd0" stroke="#929aa2"/>'
+      +'<rect x="-14" y="-16" width="28" height="4" rx="2" fill="#dde1e4" stroke="#a5adb4"/>'
+      +'<path d="M -15 -9 H 15 M -15 -5 H 15" stroke="#a5adb4" stroke-width="1"/></g>';
+  }
+  s+=entry(w/2,17,0)+entry(w-17,h/2,90)+entry(w/2,h-17,180)+entry(17,h/2,-90);
+  s+='<rect x="14" y="14" width="'+(w-28)+'" height="'+(h-28)+'" rx="16" fill="#eceff1" stroke="#979fa7" stroke-width="2"/>';
+  s+='<rect x="19" y="19" width="'+(w-38)+'" height="'+(h-38)+'" rx="12" fill="#cbd1d5" stroke="#ffffff" stroke-width="2"/>';
+  s+='<rect x="24" y="24" width="'+(w-48)+'" height="'+(h-48)+'" rx="9" fill="#e1e5e7" stroke="#aab2b9"/>';
+  [[30,30],[w-30,30],[30,h-30],[w-30,h-30]].forEach(function(p){
+    s+='<circle cx="'+p[0]+'" cy="'+p[1]+'" r="5" fill="#f1f3f4" stroke="#a5adb4" stroke-width="1.5"/>';
+  });
+  function strip(x,y,width,height,vertical){
+    let q='<rect x="'+x+'" y="'+y+'" width="'+width+'" height="'+height+'" rx="4" fill="#c5cbd0" stroke="#989fa7" stroke-width="1.3"/>';
+    q+='<rect x="'+(x+3)+'" y="'+(y+3)+'" width="'+(width-6)+'" height="'+(height-6)+'" rx="3" fill="#d9b64b" stroke="#abb2b9"/>';
+    if(vertical)q+='<rect x="'+(x+width/2-4)+'" y="'+(y+6)+'" width="8" height="'+(height-12)+'" rx="2" fill="#b48a26"/>';
+    else q+='<rect x="'+(x+6)+'" y="'+(y+height/2-4)+'" width="'+(width-12)+'" height="8" rx="2" fill="#b48a26"/>';
+    return q;
+  }
+  s+=strip(w*.275,25,w*.45,26,false)+strip(w*.275,h-51,w*.45,26,false);
+  s+=strip(25,h*.275,26,h*.45,true)+strip(w-51,h*.275,26,h*.45,true);
+  junctionTerms().forEach(function(t){
+    s+=screw(t.dx,t.dy,8.5);
+    let x=t.dx,y=t.dy,anchor='middle';
+    if(t.side==='top')y+=22;
+    if(t.side==='bottom')y-=16;
+    if(t.side==='left'){x+=19;y+=2.5;anchor='start';}
+    if(t.side==='right'){x-=19;y+=2.5;anchor='end';}
+    s+='<text x="'+x+'" y="'+y+'" text-anchor="'+anchor+'" font-size="7" fill="#596168" font-family="Segoe UI,Arial">'+t.number+'</text>';
+  });
+  s+='<text x="'+(w/2)+'" y="'+(h/2+4)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#596168" font-family="Segoe UI,Arial">'+escapeHtml(o.tag||'XR')+'</text>';
+  s+='<circle cx="'+(w/2)+'" cy="'+(h/2+26)+'" r="9" fill="none" stroke="#c3cbd1" stroke-width="2"/>';
+  return s;
+}
 function deviceInner(type, o){
   o = o || {};
   const kind = TYPES[type].kind;
@@ -1026,6 +1103,7 @@ function deviceInner(type, o){
   if (kind === 'lamp') return lampInner(o);
   if (kind === 'bulb') return bulbInner(o);
   if (kind === 'outlet') return outletInner(o);
+  if (kind === 'junction') return junctionInner(o);
   if (kind === 'wallSwitch') return wallSwitchInner(o);
   if (kind === 'twoWaySwitch') return twoWaySwitchInner(o);
   if (kind === 'appliance') return applianceInner(type,o);
@@ -1293,10 +1371,96 @@ const relayLayer  = document.getElementById('relayLayer');
 const deviceLayer = document.getElementById('deviceLayer');
 const mmLayer     = document.getElementById('mmLayer');
 
-function renderRail(){
-  const W = RAIL_X1 - RAIL_X0;
+// Равные отступы от верхней и нижней грани до осей крайних реек.
+const PANEL={width:SLOTS*MODULE+80,firstRail:360,pitch:400,baseHeight:720,inboxX:26,inboxY:36};
+function panelRailCount(panel){return Math.max(1,Math.min(5,Math.round(Number(panel.railCount)||2)));}
+function panelHeight(panel){return PANEL.baseHeight+(panelRailCount(panel)-1)*PANEL.pitch;}
+function panelById(id){return state.panels.find(function(p){return p.id===id;})||null;}
+function inboxPanel(){return state.panels.find(function(p){return p.inbox;})||null;}
+function panelInletVoltage(panel){return Number(panel&&panel.inletVoltage)===220?220:380;}
+function inboxSinglePhase(){const panel=inboxPanel();return !!panel&&panelInletVoltage(panel)===220;}
+function inboxWidth(){return inboxSinglePhase()?180:INBOX.w;}
+function inboxTerms(){return inboxSinglePhase()?INBOX_SINGLE_TERMS:INBOX_TERMS;}
+function pruneInboxConnections(){
+  const keys=inboxTerms().map(function(t){return t.key;});
+  function missing(t){return t&&String(t.devId)==='IN'&&!keys.includes(t.key);}
+  state.wires=state.wires.filter(function(w){return !missing(w.a)&&!missing(w.b);});
+  ['a','b'].forEach(function(key){if(missing(state.mm[key]))state.mm[key]=null;});
+  state.clamps.forEach(function(c){if(!state.wires.some(function(w){return w.id===c.wireId;}))c.wireId=null;});
+  if(pending&&missing(pending.from))cancelWire();
+}
+function setPanelInlet(panel,value){
+  const voltage=Number(value)===220?220:380;
+  if(panel.inbox&&voltage===220){
+    // Снятые щупы остаются на прежнем месте после исчезновения L2 и L3.
+    ['a','b'].forEach(function(key){
+      const sel=state.mm[key];if(!sel||String(sel.devId)!=='IN'||!['L2','L3'].includes(sel.key))return;
+      const p=terminal(sel.devId,sel.key);
+      if(p){if(key==='a'){METER.redX=p.x;METER.redY=p.y;}else{METER.blackX=p.x;METER.blackY=p.y;}}
+    });
+  }
+  panel.inletVoltage=voltage;
+  if(panel.inbox){
+    state.specialProps.inbox.ratedVoltage=voltage;
+    state.specialProps.inbox.customName=voltage===220?'Ввод 220 В':'Ввод 3×380 В';
+    pruneInboxConnections();
+  }
+}
+function syncPanelInbox(){
+  const panel=inboxPanel();if(!panel)return;
+  INBOX.x=panel.x+PANEL.inboxX;INBOX.y=panel.y+PANEL.inboxY;
+}
+function mountingRails(){
+  const rails=state.standaloneRails!==false?RAILS.map(function(y,i){return {id:i,x:RAIL_X0,y:y,slots:SLOTS};}):[];
+  state.panels.forEach(function(p){for(let row=0;row<panelRailCount(p);row++)rails.push({id:p.id+':'+row,x:p.x+40,y:p.y+PANEL.firstRail+row*PANEL.pitch,slots:SLOTS,panelId:p.id,row:row});});
+  return rails;
+}
+function mountingRail(id){return mountingRails().find(function(r){return r.id===id;})||null;}
+function mountingRailTitle(id){
+  const rail=mountingRail(id);
+  return rail&&rail.panelId?(panelById(rail.panelId).tag+' · рейка '+(rail.row+1)):String(Number(id)+1);
+}
+function railPlacement(left,centerY,modules,exceptId){
+  let chosen=null,best=Infinity;
+  mountingRails().forEach(function(r){
+    if(left+modules*MODULE<r.x-30||left>r.x+r.slots*MODULE+30)return;
+    const gap=Math.abs(centerY-r.y);
+    if(gap<best||(gap===best&&r.panelId)){best=gap;chosen=r;}
+  });
+  if(!chosen||best>150)return null;
+  const slot=Math.max(0,Math.min(chosen.slots-modules,Math.round((left-chosen.x)/MODULE)));
+  return {rail:chosen.id,slot:slot,railOk:true,ok:isFree(chosen.id,slot,modules,exceptId)};
+}
+function panelInner(panel){
+  const w=PANEL.width,h=panelHeight(panel);
+  let s='<rect x="1" y="1" width="'+(w-2)+'" height="'+(h-2)+'" rx="13" fill="#c6ccd1" stroke="#8f979f" stroke-width="3"/>';
+  s+='<rect x="8" y="8" width="'+(w-16)+'" height="'+(h-16)+'" rx="9" fill="none" stroke="#edf0f2" stroke-width="3"/>';
+  s+='<rect x="23" y="23" width="'+(w-46)+'" height="'+(h-46)+'" rx="6" fill="#dce1e5" stroke="#949ca4" stroke-width="2"/>';
+  s+='<rect x="34" y="34" width="'+(w-68)+'" height="'+(h-68)+'" rx="4" fill="#e4e8eb" stroke="#bcc4ca"/>';
+  [[16,16],[w-16,16],[16,h-16],[w-16,h-16]].forEach(function(p){s+='<circle cx="'+p[0]+'" cy="'+p[1]+'" r="5" fill="#dfe3e6" stroke="#9ca4ab"/>';});
+  for(let i=0;i<5;i++)s+='<ellipse cx="'+(w/2+(i-2)*44)+'" cy="'+(h-15)+'" rx="13" ry="5" fill="#b3bbc2" stroke="#919aa2"/>';
+  s+='<text x="'+(w/2)+'" y="18" text-anchor="middle" font-size="11" font-weight="700" fill="#5b646c" font-family="Segoe UI,Arial">'+escapeHtml(panel.tag||'ЩР')+'</text>';
+  return s;
+}
+function renderPanels(){
+  const layer=document.getElementById('panelLayer');
+  if(layer)layer.innerHTML=state.panels.map(function(p){
+    // Кабель проходит за корпусом щита, по центру крышки ввода.
+    const cable=p.inbox&&state.special.inbox?'<g transform="translate('+PANEL.inboxX+','+PANEL.inboxY+')">'+inboxCableInner()+'</g>':'';
+    return '<g data-panel-id="'+p.id+'" transform="translate('+p.x+','+p.y+')" style="cursor:grab;touch-action:none">'+cable+panelInner(p)+'</g>';
+  }).join('');
+}
+function detachPanelDevices(panel,fromRow){
+  state.devices.forEach(function(d){
+    if(typeof d.rail!=='string'||!d.rail.startsWith(panel.id+':'))return;
+    const row=Number(d.rail.split(':')[1]);if(row<fromRow)return;
+    d.x=panel.x+40+d.slot*MODULE;d.y=panel.y+PANEL.firstRail+row*PANEL.pitch-TYPES[d.type].h/2;
+    delete d.rail;delete d.slot;
+  });
+}
+function railSvg(rail){
+  const W=rail.slots*MODULE,RAIL_X0=rail.x,RAIL_X1=rail.x+W,SLOTS=rail.slots,cy=rail.y;
   let s = '';
-  RAILS.forEach(function(cy, idx){
     const top = cy - RAIL_H/2, bot = cy + RAIL_H/2;
     s += '<rect x="'+(RAIL_X0-3)+'" y="'+(top-4)+'" width="'+(W+6)+'" height="'+(RAIL_H+9)+'" rx="4" fill="rgba(0,0,0,.13)"/>';
     s += '<rect x="'+RAIL_X0+'" y="'+top+'" width="'+W+'" height="'+RAIL_H+'" fill="#c9ced4" stroke="#9aa0a8"/>';
@@ -1309,8 +1473,10 @@ function renderRail(){
       s += '<ellipse cx="'+cx+'" cy="'+cy+'" rx="'+(MODULE*0.30)+'" ry="11" fill="#a4a9b0" stroke="#8c9299"/>';
       s += '<ellipse cx="'+cx+'" cy="'+(cy-2)+'" rx="'+(MODULE*0.27)+'" ry="8.5" fill="#9aa0a8" opacity=".55"/>';
     }
-  });
-  railLayer.innerHTML = s;
+  return s;
+}
+function renderRail(){
+  railLayer.innerHTML=mountingRails().map(railSvg).join('');
 }
 
 function renderDevices(){
@@ -1322,8 +1488,8 @@ function renderDevices(){
     const c = placementDrag.candidate;
     const col = c.ok ? 'rgba(47,191,113,.35)' : 'rgba(255,91,91,.35)';
     const brd = c.ok ? '#2fbf71' : '#ff5b5b';
-    const t = TYPES[placementDrag.type], cy = RAILS[c.rail], top = cy - RAIL_H/2;
-    const x = RAIL_X0 + c.slot*MODULE, w = t.modules*MODULE;
+    const t = TYPES[placementDrag.type], rail=mountingRail(c.rail),cy=rail.y,top=cy-RAIL_H/2;
+    const x = rail.x + c.slot*MODULE, w = t.modules*MODULE;
     s += '<rect x="'+x+'" y="'+(top-6)+'" width="'+w+'" height="'+(RAIL_H+12)+'" rx="4" fill="'+col+'" stroke="'+brd+'" stroke-dasharray="6 4"/>';
     s += '<text x="'+(x+w/2)+'" y="'+(top-14)+'" text-anchor="middle" font-size="12" font-weight="700" fill="'+brd+'" font-family="Segoe UI,Arial">'
        + (c.ok ? ('поз. '+(c.slot+1)) : (c.railOk === false ? 'только рейка '+(t.rail+1) : 'занято')) + '</text>';
@@ -1362,9 +1528,9 @@ function renderRelays(){
   if (c && c.relay){
     const km = devById(c.kmId);
     if (km){
-      const t = TYPES.km1, cy = RAILS[km.rail];
-      const x = RAIL_X0 + km.slot*MODULE, w = t.modules*MODULE;
-      const y = cy + t.h/2 - RELAY_DROP;
+      const t = TYPES.km1,ko=originOf(km);
+      const x = ko.x, w = t.modules*MODULE;
+      const y = ko.y + t.h - RELAY_DROP;
       const ok = c.ok, col = ok ? '#2fbf71' : '#ff5b5b';
       s += '<rect x="'+x+'" y="'+(y-PIN_TOP)+'" width="'+w+'" height="'+(TYPES.kk1.h+PIN_TOP)+'" rx="5" fill="'+(ok?'rgba(47,191,113,.18)':'rgba(255,91,91,.18)')+'" stroke="'+col+'" stroke-dasharray="6 4"/>';
       s += '<text x="'+(x+w/2)+'" y="'+(y+TYPES.kk1.h+16)+'" text-anchor="middle" font-size="12" font-weight="700" fill="'+col+'" font-family="Segoe UI,Arial">'
@@ -1375,25 +1541,29 @@ function renderRelays(){
 }
 
 /* клеммная коробка ввода XT1: болты выкрашены в цвета проводов ввода */
-function inboxInner(){
-  const w = INBOX.w, h = INBOX.h;
+function inboxCableInner(){
+  const cx=inboxWidth()/2,end=INBOX.h/2;
+  return '<path d="M'+cx+' -100000 V'+end+'" fill="none" stroke="#101317" stroke-width="30" stroke-linecap="round"/>'
+    +'<path d="M'+cx+' -100000 V'+end+'" fill="none" stroke="#272c32" stroke-width="24" stroke-linecap="round"/>'
+    +'<path d="M'+(cx-6)+' -100000 V'+end+'" fill="none" stroke="#555b62" stroke-width="2" stroke-linecap="round" opacity=".75"/>';
+}
+function inboxInner(withCable){
+  const w = inboxWidth(), h = INBOX.h;
+  const single=inboxSinglePhase(),voltage=networkLineVoltageRms(),frequency=networkFrequencyHz();
   let s = '';
   // Общий вводной кабель с пятью жилами внутри: оболочка и тонкий блик.
-  s += '<path d="M180 -100000 C180 -70000 180 -20000 180 4" fill="none" stroke="#101317" stroke-width="30" stroke-linecap="round"/>';
-  s += '<path d="M180 -100000 C180 -70000 180 -20000 180 4" fill="none" stroke="#272c32" stroke-width="24" stroke-linecap="round"/>';
-  s += '<path d="M174 -100000 C174 -70000 174 -20000 174 -5" fill="none" stroke="#555b62" stroke-width="2" stroke-linecap="round" opacity=".75"/>';
-  // Увеличенный вводной корпус; выводы вынесены ниже нижней грани коробки.
+  if(withCable!==false)s+=inboxCableInner();
+  // Компактный вводной корпус; выводы вынесены ниже нижней грани коробки.
   s += '<rect x="0" y="0" width="'+w+'" height="72" rx="11" fill="#cfd4da" stroke="#858d96" stroke-width="2"/>';
   s += '<rect x="5" y="5" width="'+(w-10)+'" height="62" rx="8" fill="#e4e7ea" stroke="#f9fafb" stroke-width="1.5"/>';
   s += '<rect x="10" y="9" width="'+(w-20)+'" height="10" rx="5" fill="#c5cbd1" stroke="#a0a7ae"/>';
-  s += '<rect x="160" y="-4" width="40" height="11" rx="4" fill="#20252a" stroke="#69717a" stroke-width="1.5"/>';
-  s += '<rect x="165" y="-2" width="30" height="7" rx="3" fill="#343a40" stroke="#111418" stroke-width="1"/>';
-  s += '<text x="'+(w/2)+'" y="39" text-anchor="middle" font-size="19" font-weight="900" fill="#343a40" font-family="Segoe UI,Arial">ВВОД 3×380 В</text>';
-  s += '<text x="'+(w/2)+'" y="57" text-anchor="middle" font-size="9" font-weight="600" fill="#68717a" font-family="Segoe UI,Arial">ТРЁХФАЗНАЯ СЕТЬ · 50 Гц</text>';
-  // Две точные копии предупреждающего знака, вырезанного из предоставленного образца.
-  s += '<image href="assets/high-voltage-warning.png" x="12" y="20" width="36" height="36" preserveAspectRatio="xMidYMid meet"/>';
-  s += '<image href="assets/high-voltage-warning.png" x="312" y="20" width="36" height="36" preserveAspectRatio="xMidYMid meet"/>';
-  INBOX_TERMS.forEach(function(t){
+  s += '<text x="'+(w/2)+'" y="39" text-anchor="middle" font-size="18" font-weight="900" fill="#343a40" font-family="Segoe UI,Arial">ВВОД '+(single?'':'3×')+voltage+' В</text>';
+  s += '<text x="'+(w/2)+'" y="57" text-anchor="middle" font-size="9" font-weight="600" fill="#68717a" font-family="Segoe UI,Arial">'+(single?'ОДНОФАЗНАЯ':'ТРЁХФАЗНАЯ')+' СЕТЬ · '+frequency+' Гц</text>';
+  // Один предупреждающий знак из предоставленного образца.
+  s += single
+    ? '<image href="assets/high-voltage-warning.png" x="8" y="24" width="24" height="24" preserveAspectRatio="xMidYMid meet"/>'
+    : '<image href="assets/high-voltage-warning.png" x="10" y="23" width="32" height="32" preserveAspectRatio="xMidYMid meet"/>';
+  inboxTerms().forEach(function(t){
     s += '<rect x="'+(t.dx-18)+'" y="67" width="36" height="48" rx="7" fill="#d7dbe0" stroke="#9299a1" stroke-width="1.5"/>';
     s += '<text x="'+t.dx+'" y="83" text-anchor="middle" font-size="10.5" font-weight="800" fill="'+(t.tc||'#2b3138')+'" font-family="Segoe UI,Arial">'+t.label+'</text>';
     s += '<circle cx="'+t.dx+'" cy="'+t.dy+'" r="14" fill="rgba(0,0,0,.11)"/>';
@@ -1422,7 +1592,8 @@ function wireStrokeGeom(d, color, cls, dashed){
 }
 function renderInbox(){
   if(!state.special.inbox){boxLayer.innerHTML='';return;}
-  let s = '<g class="inbox-draggable" data-dev="IN" transform="translate('+INBOX.x+','+INBOX.y+')" style="cursor:grab;touch-action:none">' + inboxInner() + '</g>';
+  syncPanelInbox();
+  let s = '<g class="inbox-draggable" data-dev="IN" transform="translate('+INBOX.x+','+INBOX.y+')" style="cursor:grab;touch-action:none">' + inboxInner(!inboxPanel()) + '</g>';
   boxLayer.innerHTML = s;
 }
 
@@ -1541,7 +1712,8 @@ function occupancy(rail){
   return map;
 }
 function isFree(rail, slot, modules, exceptId){
-  if (!isFinite(slot) || slot < 0 || slot + modules > SLOTS) return false;
+  const mounting=mountingRail(rail);
+  if (!mounting || !isFinite(slot) || slot < 0 || slot + modules > mounting.slots) return false;
   const map = occupancy(rail);
   for (let i=0;i<modules;i++){
     const o = map[slot+i];
@@ -1604,6 +1776,10 @@ function isLive(dev){
   if (kind === 'bulb') return bulbVoltage(dev) >= 50;
   if (kind === 'outlet') return outletVoltage(dev) >= 50;
   if (kind === 'appliance') return applianceVoltage(dev) >= 50;
+  if (kind === 'junction'){
+    const map=potentialMap();
+    return junctionTerms().some(function(t){const v=map.pot[nodeKey({devId:dev.id,key:t.key})];return !!(v&&Math.hypot(v.r,v.i)>=50);});
+  }
   if (kind === 'wallSwitch' || kind === 'twoWaySwitch'){
     const map=potentialMap();
     if(map.conflict)return false;
@@ -1663,9 +1839,9 @@ function computeCandidate(evt){
     let best = null, bestD = Infinity;
     state.devices.forEach(function(d){
       if (d.type !== 'km1') return;
-      const kmX = RAIL_X0 + d.slot*MODULE;
+      const ko=originOf(d),kmX=ko.x;
       const kmCX = kmX + TYPES.km1.modules*MODULE/2;
-      const attachY = RAILS[d.rail] + TYPES.km1.h/2 - RELAY_DROP;
+      const attachY = ko.y + TYPES.km1.h - RELAY_DROP;
       const dx = Math.abs(centerX - kmCX), dy = Math.abs(top - attachY);
       const dist = dx*0.7 + dy;
       if (dx < 95 && dy < 130 && dist < bestD){ bestD = dist; best = d; }
@@ -1676,18 +1852,7 @@ function computeCandidate(evt){
   }
 
   const centerY = top + t.h/2;
-  let rail = -1, best = Infinity;
-  for (let i=0;i<RAILS.length;i++){
-    const dist = Math.abs(centerY - RAILS[i]);
-    if (dist < best){ best = dist; rail = i; }
-  }
-  if (best > 150) return null;
-  let slot = Math.round((left - RAIL_X0)/MODULE);
-  if (!isFinite(slot)) return null;
-  slot = Math.max(0, Math.min(SLOTS - t.modules, slot));
-  const railOk = true;
-  return { rail: rail, slot: slot, railOk: railOk,
-           ok: railOk && isFree(rail, slot, t.modules, drag.id) };
+  return railPlacement(left,centerY,t.modules,drag.id);
 }
 
 function startDrag(evt, spec){
@@ -1788,10 +1953,13 @@ function onPointerUp(evt){
       if (d.type === 'twoWaySwitch'){
         dev.switchPosition=1;dev.ratedVoltage=220;dev.ratedCurrent=10;
       }
+      if (d.type === 'mcb1'||d.type === 'mcb3'){
+        dev.breakerType=d.type==='mcb3'?'C25':'C10';
+      }
       if (TYPES[d.type].kind === 'appliance'){
         dev.applianceOn=false;dev.applianceBurned=false;
         dev.ratedVoltage=220;dev.ratedPower=TYPES[d.type].defaultPower;
-        dev.ratedCurrent=+(dev.ratedPower/dev.ratedVoltage).toFixed(1);
+        syncApplianceRatings(dev);
       }
       if (d.type === 'vfd'){
         dev.ratedVoltage=380;dev.ratedCurrent=10;dev.baseFrequency=50;dev.maxFrequency=100;
@@ -1801,7 +1969,7 @@ function onPointerUp(evt){
       state.devices.push(dev);
       const placement = TYPES[d.type].title
           + (cand.free ? ' — свободное размещение на рабочем поле.'
-                       : ' — рейка ' + (cand.rail+1) + ', позиция ' + (cand.slot+1));
+                       : ' — рейка ' + mountingRailTitle(cand.rail) + ', позиция ' + (cand.slot+1));
       if (d.id) trace('Аппарат перемещён: ' + placement);   // перенос по полю — рутина
       else log('Установлен: ' + placement, 'ok');
       if (d.attachedRelay){                    // реле едет вместе с пускателем
@@ -1828,10 +1996,12 @@ document.addEventListener('pointerup', onPointerUp);
 /* Перетаскивание крупных объектов из лотка на свободное место рабочего поля. */
 let specialTrayDrag=null;
 function specialGhostSize(key){
+  if(key==='panel')return {w:PANEL.width,h:panelHeight({railCount:2})};
+  if(key==='clamp')return {w:172,h:72};
   if(key==='motor'||key==='dcmotor')return {w:MOTOR.w*MOTOR.scale,h:MOTOR.h*MOTOR.scale};
   if(key==='pushbutton')return {w:PB.w+48,h:PB.h};
   if(key==='multimeter')return {w:METER.w,h:METER.h+28};
-  if(key==='inbox')return {w:INBOX.w,h:INBOX.h};
+  if(key==='inbox')return {w:inboxWidth(),h:INBOX.h};
   return {w:180,h:120};
 }
 function placeSpecialGhost(evt,d){
@@ -1861,6 +2031,21 @@ function finishSpecialTrayDrag(evt){
   const rect=scene.getBoundingClientRect();
   const overScene=evt.clientX>=rect.left&&evt.clientX<=rect.right&&evt.clientY>=rect.top&&evt.clientY<=rect.bottom;
   if(d.moved&&!overScene){renderTray();return;}
+  if(d.key==='panel'){
+    const p=d.moved?svgPoint(evt):svgPoint({clientX:rect.left+rect.width*.5,clientY:rect.top+rect.height*.5});
+    const n=nextSpecialNumber(state.panels,'PN');
+    const withInbox=!state.special.inbox;
+    state.panels.push({id:'PN'+n,tag:'ЩР'+n,railCount:2,x:p.x-PANEL.width/2,y:p.y-panelHeight({railCount:2})/2,inbox:withInbox,inletVoltage:380});
+    if(withInbox)state.special.inbox=true;
+    renderAll();return;
+  }
+  if(d.key==='clamp'){
+    const p=d.moved?svgPoint(evt):svgPoint({clientX:rect.left+rect.width*.35,clientY:rect.top+rect.height*.3});
+    const clamp=createClamp(p.x-50,p.y);
+    const hit=clampNearestWire(clamp);
+    if(hit){clamp.wireId=hit.id;clamp.fraction=hit.fraction;clamp.x=hit.x;clamp.y=hit.y;}
+    renderClamp();renderTray();return;
+  }
   if(d.moved){
     const p=svgPoint(evt);
     if(d.key==='motor'){
@@ -1877,7 +2062,7 @@ function finishSpecialTrayDrag(evt){
       const n=nextSpecialNumber(state.pushbuttons,'PB'),first=(n-1)*3+1;
       state.pushbuttons.push({id:'PB'+n,tag:'SB'+first+'–SB'+(first+2),x:p.x-PB.w/2,y:p.y-PB.h/2,w:PB.w,h:PB.h,buttons:{up:false,stop:false,down:false}});
     }
-    else if(d.key==='inbox'){INBOX.x=p.x-INBOX.w/2;INBOX.y=p.y-INBOX.h/2;}
+    else if(d.key==='inbox'){INBOX.x=p.x-inboxWidth()/2;INBOX.y=p.y-INBOX.h/2;}
     else if(d.key==='multimeter'){
       METER.x=p.x-METER.w/2;METER.y=p.y-(METER.h-28)/2;
       METER.redX=METER.x+158;METER.redY=METER.y-58;
@@ -1919,17 +2104,7 @@ function computeFreeRailCandidate(evt, fd){
   if (!isFinite(p.x) || !isFinite(p.y)) return null;
   if(t.freeOnly)return null;
   const left = p.x-fd.offX, top = p.y-fd.offY, centerY = top+t.h/2;
-  let rail = -1, best = Infinity;
-  for (let i=0;i<RAILS.length;i++){
-    const dist = Math.abs(centerY-RAILS[i]);
-    if (dist < best){ best = dist; rail = i; }
-  }
-  if (best > 150) return null;
-  let slot = Math.round((left-RAIL_X0)/MODULE);
-  slot = Math.max(0, Math.min(SLOTS-t.modules, slot));
-  const railOk = true;
-  return { rail:rail, slot:slot, railOk:railOk,
-           ok:railOk && isFree(rail, slot, t.modules, fd.devId) };
+  return railPlacement(left,centerY,t.modules,fd.devId);
 }
 document.addEventListener('pointermove', function(evt){
   if (!freeDeviceDrag || evt.pointerId !== freeDeviceDrag.pointerId) return;
@@ -1954,7 +2129,7 @@ function finishFreeDeviceDrag(evt){
     d.slot = candidate.slot;
     delete d.x;
     delete d.y;
-    log('Аппарат установлен на DIN-рейку '+(candidate.rail+1)+', позиция '+(candidate.slot+1)+'.', 'ok');
+    log('Аппарат установлен на DIN-рейку '+mountingRailTitle(candidate.rail)+', позиция '+(candidate.slot+1)+'.', 'ok');
   }
   freeDeviceDrag = null;
   if (!moved && d) toggleDevice(d);
@@ -2297,11 +2472,13 @@ function motorRotationFrame(now){
 }
 requestAnimationFrame(motorRotationFrame);
 
-/* вводная клеммная коробка также свободно перемещается вместе с проводами */
+/* Ввод внутри щита переносит весь щит; ввод из старых схем движется отдельно. */
 let inboxDrag = null;
 boxLayer.addEventListener('pointerdown', function(evt){
   const body = evt.target.closest('.inbox-draggable');
   if (!body || evt.button !== 0) return;
+  const panel=inboxPanel();
+  if(panel){startPanelDrag(evt,panel);return;}
   evt.preventDefault();
   cancelWire();
   const p = svgPoint(evt);
@@ -2457,7 +2634,12 @@ function characteristicsFor(target){
   if(!target)return null;
   if(target.kind==='device'){
     obj=devById(target.id);if(!obj)return null;
-    title=tagOf(obj.id);type=TYPES[obj.type].title;
+    if(TYPES[obj.type].kind==='appliance')syncApplianceRatings(obj);
+    title=tagOf(obj.id);
+    if(obj.type==='mcb1'||obj.type==='mcb3'){
+      const fallback=obj.type==='mcb3'?'C25':'C10';
+      type='Автомат '+(obj.type==='mcb3'?'3P, ':'1P, ')+(obj.breakerType||fallback);
+    }else type=obj.customName||TYPES[obj.type].title;
   }else if(target.kind==='relay'){
     obj=anyRelayById(target.id);if(!obj)return null;
     title=tagOf('kk'+obj.id);type='Тепловое реле';
@@ -2474,12 +2656,40 @@ function characteristicsFor(target){
     obj=state.specialProps.inbox;title=obj.tag||'XT1';type='Вводная клеммная коробка';
   }else if(target.kind==='special'&&target.key==='multimeter'){
     obj=state.specialProps.multimeter;title=obj.tag||'PV1';type='Цифровой мультиметр';
+  }else if(target.kind==='special'&&target.key==='clamp'){
+    obj=state.clamps.find(function(c){return c.id===target.id;});if(!obj)return null;
+    title=obj.tag||obj.id;type='Токовые клещи';
+  }else if(target.kind==='special'&&target.key==='panel'){
+    obj=panelById(target.id);if(!obj)return null;
+    title=obj.tag||obj.id;type='Монтажный щит';
   }
   if(!obj)return null;
-  let fields=[
-    propertyField('tag','Позиционное обозначение','text',title),
-    propertyField('customName','Наименование','text',type,'',undefined,undefined,undefined,true)
-  ];
+  let fields=[];
+  if(target.kind==='device'&&(obj.type==='mcb1'||obj.type==='mcb3')){
+    const defaultBreakerType=obj.type==='mcb3'?'C25':'C10';
+    fields.push(propertyField('breakerType','Тип автомата','select',obj.breakerType||defaultBreakerType,'',undefined,undefined,undefined,false,[
+      {value:'C2',label:'C2 — 2 А'},
+      {value:'C4',label:'C4 — 4 А'},
+      {value:'C6',label:'C6 — 6 А'},
+      {value:'C10',label:'C10 — 10 А'},
+      {value:'C13',label:'C13 — 13 А'},
+      {value:'C16',label:'C16 — 16 А'},
+      {value:'C20',label:'C20 — 20 А'},
+      {value:'C25',label:'C25 — 25 А'},
+      {value:'C32',label:'C32 — 32 А'},
+      {value:'C40',label:'C40 — 40 А'},
+      {value:'C50',label:'C50 — 50 А'},
+      {value:'C63',label:'C63 — 63 А'}
+    ]));
+  }
+  fields.push(propertyField('tag','Позиционное обозначение','text',title));
+  if(target.kind==='special'&&target.key==='panel'&&obj.inbox){
+    fields.push(propertyField('inletVoltage','Ввод','select',String(panelInletVoltage(obj)),'',undefined,undefined,undefined,false,[
+      {value:'380',label:'380 В — трёхфазный'},
+      {value:'220',label:'220 В — однофазный'}
+    ]));
+  }
+  fields.push(propertyField('customName','Наименование','text',type,'',undefined,undefined,undefined,true));
   if(target.kind==='relay'){
     fields.push(propertyField('set','Уставка тока','number',25,'А',1,100,1));
   }else if(target.kind==='special'&&target.key==='motor'){
@@ -2506,6 +2716,11 @@ function characteristicsFor(target){
     fields.push(propertyField('frequency','Частота сети','number',50,'Гц',1,400,1));
   }else if(target.kind==='special'&&target.key==='multimeter'){
     fields.push(propertyField('measurementCategory','Категория измерений','text','CAT III 600 V','',undefined,undefined,undefined,true));
+  }else if(target.kind==='special'&&target.key==='panel'){
+    fields.push(propertyField('railCount','Количество DIN-реек','select',String(panelRailCount(obj)),'',undefined,undefined,undefined,false,[
+      {value:'1',label:'1 рейка'},{value:'2',label:'2 рейки'},{value:'3',label:'3 рейки'},
+      {value:'4',label:'4 рейки'},{value:'5',label:'5 реек'}
+    ]));
   }else if(target.kind==='device'){
     const defaults={
       mcb3:[380,25],mcb1:[220,10],rcd:[220,25],meter:[220,60],sensor:[220,80],
@@ -2515,7 +2730,12 @@ function characteristicsFor(target){
     }[obj.type];
     if(defaults){
       fields.push(propertyField('ratedVoltage','Номинальное напряжение','number',defaults[0],'В',1,1000,1));
-      fields.push(propertyField('ratedCurrent','Номинальный ток','number',defaults[1],'А',0.01,1000,0.01));
+      const appliance=TYPES[obj.type].kind==='appliance';
+      const currentDefault=appliance?applianceRatings(obj).ratedCurrent:(obj.type==='mcb1'||obj.type==='mcb3')
+        ? Math.max(2,Number(String(obj.breakerType||(obj.type==='mcb3'?'C25':'C10')).replace(/^C/,''))||10)
+        : defaults[1];
+      const nominalVoltage=ratedVoltageOf(obj,defaults[0]);
+      fields.push(propertyField('ratedCurrent','Номинальный ток','number',currentDefault,'А',appliance?1/nominalVoltage:0.01,appliance?30000/nominalVoltage:1000,appliance?'any':0.01));
     }
     if(obj.type==='rcd')fields.push(propertyField('ratedLeakageMa','Дифференциальный ток','number',30,'мА',1,1000,1));
     if(obj.type==='lamp')fields.push(propertyField('indicator','Цвет индикатора','select',obj.indicator||'green','',undefined,undefined,undefined,false,[
@@ -2524,7 +2744,7 @@ function characteristicsFor(target){
       {value:'yellow',label:'Жёлтый'}
     ]));
     if(obj.type==='lamp'||obj.type==='bulb')fields.push(propertyField('ratedPower','Мощность','number',obj.type==='bulb'?100:1,'Вт',0.1,5000,0.1));
-    if(TYPES[obj.type].kind==='appliance')fields.push(propertyField('ratedPower','Мощность','number',TYPES[obj.type].defaultPower,'Вт',1,30000,1));
+    if(TYPES[obj.type].kind==='appliance')fields.push(propertyField('ratedPower','Мощность','number',TYPES[obj.type].defaultPower,'Вт',1,30000,'any'));
     if(obj.type==='wallSwitch')fields.push(propertyField('gangs','Количество клавиш','select',Number(obj.gangs)===2?'2':'1','',undefined,undefined,undefined,false,[
       {value:'1',label:'Одна клавиша'},
       {value:'2',label:'Две клавиши'}
@@ -2568,6 +2788,31 @@ function openProperties(target){
   propertiesModal.classList.add('open');propertiesModal.setAttribute('aria-hidden','false');
   const first=propertiesFields.querySelector('input,select,textarea');if(first)first.focus();
 }
+propertiesFields.addEventListener('change',function(evt){
+  if(!propertiesTarget||!(propertiesTarget.object.type==='mcb1'||propertiesTarget.object.type==='mcb3')||evt.target.getAttribute('data-property-key')!=='breakerType')return;
+  const selected=evt.target.value||'C10';
+  const amperage=Math.max(2,Number(String(selected).replace(/^C/,''))||10);
+  const nameInput=propertiesFields.querySelector('[data-property-key="customName"]');
+  const currentInput=propertiesFields.querySelector('[data-property-key="ratedCurrent"]');
+  if(nameInput)nameInput.value=(propertiesTarget.object.type==='mcb3'?'Автомат 3P, ':'Автомат 1P, ')+selected;
+  if(currentInput)currentInput.value=String(amperage);
+});
+function syncAppliancePropertyInputs(changedKey){
+  if(!propertiesTarget||!TYPES[propertiesTarget.object.type]||TYPES[propertiesTarget.object.type].kind!=='appliance')return;
+  if(!['ratedPower','ratedCurrent','ratedVoltage'].includes(changedKey))return;
+  const controls={};
+  ['ratedVoltage','ratedPower','ratedCurrent'].forEach(function(key){controls[key]=propertiesFields.querySelector('[data-property-key="'+key+'"]');});
+  if(Object.values(controls).some(function(input){return !input||!isFinite(Number(input.value))||Number(input.value)<=0;}))return;
+  const ratings=applianceRatings({type:propertiesTarget.object.type,ratedVoltage:controls.ratedVoltage.value,ratedPower:controls.ratedPower.value,ratedCurrent:controls.ratedCurrent.value},changedKey);
+  // Изменённое поле оставляем под курсором; обновляем зависимое значение.
+  if(changedKey==='ratedCurrent')controls.ratedPower.value=String(ratings.ratedPower);
+  else controls.ratedCurrent.value=String(ratings.ratedCurrent);
+  controls.ratedCurrent.min=String(1/ratings.ratedVoltage);
+  controls.ratedCurrent.max=String(30000/ratings.ratedVoltage);
+}
+function handleAppliancePropertyInput(evt){syncAppliancePropertyInputs(evt.target.getAttribute('data-property-key'));}
+propertiesFields.addEventListener('input',handleAppliancePropertyInput);
+propertiesFields.addEventListener('change',handleAppliancePropertyInput);
 function saveProperties(){
   if(!propertiesTarget)return;
   const obj=propertiesTarget.object;
@@ -2578,11 +2823,25 @@ function saveProperties(){
     let value=input.value;
     if(f.type==='number'){
       value=Number(value);if(!isFinite(value))value=Number(f.def)||0;
-      if(f.min!==undefined)value=Math.max(f.min,value);if(f.max!==undefined)value=Math.min(f.max,value);
+      const applianceCurrent=f.key==='ratedCurrent'&&TYPES[obj.type]&&TYPES[obj.type].kind==='appliance';
+      const min=applianceCurrent?1/ratedVoltageOf(obj,220):f.min,max=applianceCurrent?30000/ratedVoltageOf(obj,220):f.max;
+      if(min!==undefined)value=Math.max(min,value);if(max!==undefined)value=Math.min(max,value);
     }else value=String(value).trim();
     if(f.key==='tag'&&!value)value=String(f.def||'');
+    if(f.key==='inletVoltage'){setPanelInlet(obj,value);return;}
     obj[f.key]=value;
   });
+  if(TYPES[obj.type]&&TYPES[obj.type].kind==='appliance')syncApplianceRatings(obj);
+  if(obj.type==='mcb1'||obj.type==='mcb3'){
+    const allowed=['C2','C4','C6','C10','C13','C16','C20','C25','C32','C40','C50','C63'];
+    if(allowed.indexOf(obj.breakerType)<0)obj.breakerType=obj.type==='mcb3'?'C25':'C10';
+    const selectedCurrent=Math.max(2,Number(String(obj.breakerType).replace(/^C/,''))||10);
+    obj.ratedCurrent=selectedCurrent;
+    obj.customName=(obj.type==='mcb3'?'Автомат 3P, ':'Автомат 1P, ')+obj.breakerType;
+  }
+  if(propertiesTarget.target.kind==='special'&&propertiesTarget.target.key==='panel'){
+    obj.railCount=panelRailCount(obj);detachPanelDevices(obj,obj.railCount);
+  }
   // Изменение номинала означает выбор другой модификации аппарата.
   // Поэтому старое повреждение от перенапряжения к новой модификации не переносим.
   if(Math.abs(ratedVoltageOf(obj,220)-previousRatedVoltage)>.01){
@@ -2641,6 +2900,9 @@ function detachMeterFromObject(devId){
 }
 function removeObjectFromScene(target){
   if(!target)return;
+  if(target.kind==='special'&&target.key==='inbox'){
+    const panel=inboxPanel();if(panel)target={kind:'special',key:'panel',id:panel.id};
+  }
   if(target.kind==='relay'){
     const rel=anyRelayById(target.id);if(!rel)return;
     if(relayLive(rel)){warn('Пускатель под напряжением — сначала обесточьте катушку.');return;}
@@ -2661,6 +2923,17 @@ function removeObjectFromScene(target){
     log(TYPES[dev.type].title+' возвращён в лоток'+(attached.length?' вместе с тепловым реле.':'.'),'info');
   }else if(target.kind==='special'){
     const key=target.key;
+    if(key==='panel'){
+      const panel=panelById(target.id);if(!panel)return;
+      if(panel.inbox){detachMeterFromObject('IN');removeWiresFor('IN');state.special.inbox=false;}
+      detachPanelDevices(panel,0);state.panels=state.panels.filter(function(p){return p.id!==panel.id;});
+      renderAll();return;
+    }
+    if(key==='clamp'){
+      state.clamps=state.clamps.filter(function(c){return c.id!==target.id;});
+      if(clampState&&clampState.id===target.id)clampState=null;
+      renderClamp();renderTray();return;
+    }
     if(key==='inbox'){detachMeterFromObject('IN');removeWiresFor('IN');}
     else if(key==='pushbutton'){
       const pb=pushbuttonById(target.id);if(pb){detachMeterFromObject(pb.id);removeWiresFor(pb.id);state.pushbuttons=state.pushbuttons.filter(function(x){return x.id!==pb.id;});}
@@ -2698,7 +2971,11 @@ deviceLayer.addEventListener('contextmenu', function(evt){
   if (!g) return;
   showObjectMenu(evt,{kind:'device',id:+g.dataset.id});
 });
-boxLayer.addEventListener('contextmenu',function(evt){if(evt.target.closest('.inbox-draggable'))showObjectMenu(evt,{kind:'special',key:'inbox'});});
+boxLayer.addEventListener('contextmenu',function(evt){
+  if(!evt.target.closest('.inbox-draggable'))return;
+  const panel=inboxPanel();
+  showObjectMenu(evt,panel?{kind:'special',key:'panel',id:panel.id}:{kind:'special',key:'inbox'});
+});
 motorLayer.addEventListener('contextmenu',function(evt){const body=evt.target.closest('.motor-draggable');const control=evt.target.closest('.motor-load-control');const id=body?body.dataset.dev:(control&&control.querySelector('.motor-load')&&control.querySelector('.motor-load').dataset.mid);if(id){const motor=motorById(id);showObjectMenu(evt,{kind:'special',key:motorIsDc(motor)?'dcmotor':'motor',id:id});}});
 mmLayer.addEventListener('contextmenu',function(evt){if(evt.target.closest('.multimeter-body,.mm-probe'))showObjectMenu(evt,{kind:'special',key:'multimeter'});});
 
@@ -3478,6 +3755,7 @@ const termLayer = document.getElementById('termLayer');
 /* зажимы аппарата в его локальных координатах */
 function termDefs(type,obj){
   const t = TYPES[type], w = t.modules*MODULE, h = t.h, out = [];
+  if(type==='junction')return junctionTerms();
   if (type === 'mcb3'){
     const cell = w/3;
     ['1','3','5'].forEach(function(l,i){ out.push({key:'t'+i, label:l, dx:(i+0.5)*cell, dy:18,    color:[WC.L1,WC.L2,WC.L3][i]}); });
@@ -3622,7 +3900,8 @@ function originOf(dev){
     return { x:ko.x, y:ko.y + TYPES.km1.h - RELAY_DROP };
   }
   if (isFinite(dev.x) && isFinite(dev.y)) return { x:dev.x, y:dev.y };
-  return { x: RAIL_X0 + dev.slot*MODULE, y: RAILS[dev.rail] - TYPES[dev.type].h/2 };
+  const rail=mountingRail(dev.rail);
+  return rail?{x:rail.x+dev.slot*MODULE,y:rail.y-TYPES[dev.type].h/2}:{x:0,y:0};
 }
 function terminal(devId, key){
   if (String(devId).indexOf('PB') === 0){
@@ -3640,7 +3919,8 @@ function terminal(devId, key){
              x:motor.x + m.dx*motor.scale, y:motor.y + m.dy*motor.scale };
   }
   if (String(devId) === 'IN'){                     // зажимы клеммной коробки ввода
-    const m = INBOX_TERMS.filter(function(t){ return t.key === key; })[0];
+    syncPanelInbox();
+    const m = inboxTerms().filter(function(t){ return t.key === key; })[0];
     if (!m) return null;
     return { devId:'IN', key:key, label:m.label, color:m.color, x:INBOX.x + m.dx, y:INBOX.y + m.dy };
   }
@@ -3893,7 +4173,7 @@ function renderTerminals(){
          + '<title>'+escapeHtml(motor.id)+' · зажим '+escapeHtml(td.label)+' — щёлкните, чтобы тянуть провод</title></circle>';
     });
   });
-  if(state.special.inbox) INBOX_TERMS.forEach(function(td){
+  if(state.special.inbox) inboxTerms().forEach(function(td){
     const p = terminal('IN', td.key);
     if (!p) return;
     s += '<circle class="term" data-dev="IN" data-key="'+td.key+'" cx="'+p.x+'" cy="'+p.y+'" r="11" fill="transparent" pointer-events="all">'
@@ -3936,7 +4216,7 @@ function terminalGuidePoints(){
   state.devices.forEach(function(d){add(d.id,d.type,d);});
   state.relays.forEach(function(r){add('kk'+r.id,'kk1');});
   state.motors.forEach(function(motor){(motorIsDc(motor)?DC_MOTOR_TERMS:MOTOR_TERMS).forEach(function(td){const p=terminal(motor.id,td.key);if(p){const k=Math.round(p.x*10)+'/'+Math.round(p.y*10);if(!seen[k]){seen[k]=true;points.push(p);}}});});
-  if(state.special.inbox)INBOX_TERMS.forEach(function(td){const p=terminal('IN',td.key);if(p){const k=Math.round(p.x*10)+'/'+Math.round(p.y*10);if(!seen[k]){seen[k]=true;points.push(p);}}});
+  if(state.special.inbox)inboxTerms().forEach(function(td){const p=terminal('IN',td.key);if(p){const k=Math.round(p.x*10)+'/'+Math.round(p.y*10);if(!seen[k]){seen[k]=true;points.push(p);}}});
   state.pushbuttons.forEach(function(pb){PB_TERMS.forEach(function(td){const p=terminal(pb.id,td.key);if(p){const k=Math.round(p.x*10)+'/'+Math.round(p.y*10);if(!seen[k]){seen[k]=true;points.push(p);}}});});
   return points;
 }
@@ -4257,11 +4537,14 @@ const AC_NETWORK = Object.freeze({
 });
 const V_ZERO = {r:0,i:0,frequencyHz:0,source:'reference'};
 function networkLineVoltageRms(){
+  const panel=inboxPanel();if(panel)return panelInletVoltage(panel);
   const props=state&&state.specialProps&&state.specialProps.inbox;
   const value=Number(props&&props.ratedVoltage);
   return isFinite(value)&&value>0?value:AC_NETWORK.nominalLineVoltageRms;
 }
-function networkPhaseVoltageRms(){ return networkLineVoltageRms()/Math.sqrt(3); }
+function networkPhaseVoltageRms(){ return networkLineVoltageRms()/(inboxSinglePhase()?1:Math.sqrt(3)); }
+function networkPhaseSequence(){return inboxSinglePhase()?['L1']:AC_NETWORK.phaseSequence.slice();}
+function networkKind(){return inboxSinglePhase()?'single-phase-three-wire-sine':AC_NETWORK.kind;}
 function networkFrequencyHz(){
   const props=state&&state.specialProps&&state.specialProps.inbox;
   const value=Number(props&&props.frequency);
@@ -4273,6 +4556,7 @@ function vecPhase(deg,rms){
   return {r:magnitude*Math.cos(a),i:magnitude*Math.sin(a),frequencyHz:networkFrequencyHz()};
 }
 function sourcePhasePhasor(phase){
+  if(inboxSinglePhase()&&phase!=='L1')return V_ZERO;
   const angle=AC_NETWORK.phaseAnglesDeg[phase];
   if(angle===undefined)return V_ZERO;
   const value=vecPhase(angle,networkPhaseVoltageRms());
@@ -4350,19 +4634,20 @@ function acCurrentThroughImpedance(a,b,impedance,timeSeconds,map){
 }
 function acSourceSnapshot(timeSeconds){
   const time=isFinite(Number(timeSeconds))?Number(timeSeconds):acNowSeconds();
-  const energized=!!state.power,phasors={};
-  AC_NETWORK.phaseSequence.forEach(function(phase){phasors[phase]=energized?sourcePhasePhasor(phase):V_ZERO;});
+  const energized=!!(state.power&&state.special.inbox),phasors={},sequence=networkPhaseSequence();
+  sequence.forEach(function(phase){phasors[phase]=energized?sourcePhasePhasor(phase):V_ZERO;});
   const phaseSamples={},lineSamples={};
-  AC_NETWORK.phaseSequence.forEach(function(phase){phaseSamples[phase]=acPhasorSample(phasors[phase],time);});
+  sequence.forEach(function(phase){phaseSamples[phase]=acPhasorSample(phasors[phase],time);});
   [['L1','L2'],['L2','L3'],['L3','L1']].forEach(function(pair){
+    if(!phasors[pair[0]]||!phasors[pair[1]])return;
     lineSamples[pair[0]+'-'+pair[1]]=acPhasorSample(phasorDifference(phasors[pair[0]],phasors[pair[1]]),time);
   });
   return {
-    kind:AC_NETWORK.kind,
+    kind:networkKind(),
     energized:energized,
     frequencyHz:networkFrequencyHz(),
     periodSeconds:1/networkFrequencyHz(),
-    phaseSequence:AC_NETWORK.phaseSequence.slice(),
+    phaseSequence:sequence,
     lineVoltageRms:networkLineVoltageRms(),
     phaseVoltageRms:networkPhaseVoltageRms(),
     timeSeconds:time,
@@ -4412,6 +4697,11 @@ function internalLinks(){
     }
     if (d.type === 'twoWaySwitch'){
       link(d.id,'L',d.id,Number(d.switchPosition)===2?'O2':'O1');
+    }
+    if(d.type==='junction'){
+      ['top','right','bottom','left'].forEach(function(side){
+        link(d.id,side+'0',d.id,side+'1');link(d.id,side+'1',d.id,side+'2');
+      });
     }
     if (d.type === 'km1' && contactorClosed(d)){
       for (let i=0;i<3;i++) link(d.id,'t'+i,d.id,'b'+i);
@@ -4559,13 +4849,10 @@ function potentialMap(){
       }
     }
   }
-  if (state.power){
-    src('IN','L1', sourcePhasePhasor('L1'));
-    src('IN','L2', sourcePhasePhasor('L2'));
-    src('IN','L3', sourcePhasePhasor('L3'));
+  if (state.power&&state.special.inbox){
+    networkPhaseSequence().forEach(function(phase){src('IN',phase,sourcePhasePhasor(phase));});
   }
-  src('IN','N',  V_ZERO);
-  src('IN','PE', V_ZERO);
+  if(state.special.inbox){src('IN','N',V_ZERO);src('IN','PE',V_ZERO);}
   propagate();
 
   // Выход ПЧ является новым трёхфазным источником, гальванически отделённым
@@ -4600,7 +4887,7 @@ function potentialMap(){
     propagate();
   });
   return {pot:pot,conflict:conflict,conflicts:conflicts,adj:adj,
-    ac:{frequencyHz:networkFrequencyHz(),lineVoltageRms:networkLineVoltageRms(),phaseVoltageRms:networkPhaseVoltageRms(),kind:AC_NETWORK.kind}};
+    ac:{frequencyHz:networkFrequencyHz(),lineVoltageRms:networkLineVoltageRms(),phaseVoltageRms:networkPhaseVoltageRms(),kind:networkKind()}};
 }
 
 /* Находим тепловое реле, через силовой тракт которого фактически запитан М1. */
@@ -5035,6 +5322,14 @@ if (typeof document.getElementById('zin').addEventListener === 'function'){
    9. ПАНЕЛЬ: ЛОТОК ДЕТАЛЕЙ
    ============================================================ */
 function specialTrayPreview(key){
+  if(key==='panel'){
+    const panel={x:0,y:0,railCount:2,tag:'ЩР'};
+    let s=panelInner(panel);
+    if(!state.special.inbox)s+='<g transform="translate('+PANEL.inboxX+','+PANEL.inboxY+')">'+inboxInner(false)+'</g>';
+    for(let row=0;row<2;row++)s+=railSvg({x:40,y:PANEL.firstRail+row*PANEL.pitch,slots:SLOTS});
+    return '<svg class="mini" viewBox="0 0 '+PANEL.width+' '+panelHeight(panel)+'" preserveAspectRatio="xMidYMid meet">'+s+'</svg>';
+  }
+  if(key==='clamp')return '<svg class="mini" viewBox="-36 -36 172 72" preserveAspectRatio="xMidYMid meet">'+clampObjectSvg({id:'preview',x:0,y:0,wireId:null,drag:false},{})+'</svg>';
   if(key==='motor'){
     return '<svg class="mini" viewBox="-20 -20 272 292" preserveAspectRatio="xMidYMid meet">'
       +motorInner(0,{load:0,rpm:0,current:0,visualDur:1})+'</svg>';
@@ -5048,7 +5343,7 @@ function specialTrayPreview(key){
       +pushbuttonInner()+'</svg>';
   }
   if(key==='inbox'){
-    return '<svg class="mini" viewBox="0 0 '+INBOX.w+' '+INBOX.h+'" preserveAspectRatio="xMidYMid meet">'
+    return '<svg class="mini" viewBox="0 0 '+inboxWidth()+' '+INBOX.h+'" preserveAspectRatio="xMidYMid meet">'
       +inboxInner()+'</svg>';
   }
   if(key==='multimeter'){
@@ -5079,9 +5374,10 @@ function renderTray(){
           +   '<span class="stock" title="Количество не ограничено">∞</span>'
           + '</div>';
   });
-  const specialTitles={inbox:'Клеммная коробка XT1',pushbutton:'Кнопочный пост',motor:'Асинхронный двигатель',dcmotor:'Двигатель постоянного тока',multimeter:'Цифровой мультиметр'};
-  const unlimitedSpecials={motor:true,dcmotor:true,pushbutton:true};
+  const specialTitles={inbox:'Клеммная коробка XT1',pushbutton:'Кнопочный пост',motor:'Асинхронный двигатель',dcmotor:'Двигатель постоянного тока',multimeter:'Цифровой мультиметр',clamp:'Токовые клещи',panel:'Монтажный щит'};
+  const unlimitedSpecials={motor:true,dcmotor:true,pushbutton:true,clamp:true,panel:true};
   Object.keys(specialTitles).forEach(function(key){
+    if(key==='inbox'&&state.standaloneRails===false)return;
     if(!unlimitedSpecials[key]&&state.special[key])return;
     html+='<div class="tray-item tray-special" data-special="'+key+'">'
         +specialTrayPreview(key)+'<div class="tray-meta"><b>'+specialTitles[key]+'</b>'
@@ -5239,7 +5535,9 @@ function renderSide(){
   renderMM();
 }
 function renderAll(){
+  syncPanelInbox();
   updateCoils();                 // сначала считаем, что замкнуто в цепи (катушка A1–A2)
+  renderPanels();renderRail();
   renderInbox();
   renderDevices();
   renderRelays();
@@ -5248,6 +5546,7 @@ function renderAll(){
   renderTerminals();
   renderMM();
   renderSide();
+  renderClamp();
 }
 
 /* ============================================================
@@ -5277,6 +5576,7 @@ function escapeHtml(value){
   });
 }
 function schemeSnapshot(name,id){
+  syncPanelInbox();
   const wires=state.wires.map(function(w){
     const copy=JSON.parse(JSON.stringify(w));
     delete copy.previewShape;
@@ -5302,6 +5602,9 @@ function schemeSnapshot(name,id){
       relays:JSON.parse(JSON.stringify(state.relays)),wires:wires,nextId:state.nextId,
       motors:JSON.parse(JSON.stringify(state.motors)),
       pushbuttons:JSON.parse(JSON.stringify(state.pushbuttons)),
+      panels:JSON.parse(JSON.stringify(state.panels)),
+      standaloneRails:state.standaloneRails!==false,
+      clamps:state.clamps.map(function(c){return {id:c.id,tag:c.tag,customName:c.customName,x:c.x,y:c.y,wireId:c.wireId,fraction:c.fraction};}),
       specialProps:JSON.parse(JSON.stringify(state.specialProps||{})),
       special:JSON.parse(JSON.stringify(state.special))},
     positions:{inbox:{x:INBOX.x,y:INBOX.y},pushbutton:{x:PB.x,y:PB.y},
@@ -5371,11 +5674,16 @@ function loadSelectedPreset(){
       d.ratedVoltage=Math.max(1,Number(d.ratedVoltage)||220);
       d.ratedCurrent=Math.max(.01,Number(d.ratedCurrent)||10);
     }
+    if(d.type==='mcb1'||d.type==='mcb3'){
+      const allowed=['C2','C4','C6','C10','C13','C16','C20','C25','C32','C40','C50','C63'];
+      if(allowed.indexOf(d.breakerType)<0)d.breakerType=d.type==='mcb3'?'C25':'C10';
+      d.ratedCurrent=Math.max(2,Number(String(d.breakerType).replace(/^C/,''))||10);
+      d.customName=(d.type==='mcb3'?'Автомат 3P, ':'Автомат 1P, ')+d.breakerType;
+    }
     if(TYPES[d.type]&&TYPES[d.type].kind==='appliance'){
       d.applianceOn=!!d.applianceOn;d.applianceBurned=!!d.applianceBurned;
       d.ratedVoltage=Math.max(1,Number(d.ratedVoltage)||220);
-      d.ratedPower=Math.max(1,Number(d.ratedPower)||TYPES[d.type].defaultPower);
-      d.ratedCurrent=Math.max(.01,Number(d.ratedCurrent)||(d.ratedPower/d.ratedVoltage));
+      syncApplianceRatings(d);
     }
     if(d.type==='tp'){
       d.ratedVoltage=Math.max(1,Number(d.ratedVoltage)||380);
@@ -5390,6 +5698,18 @@ function loadSelectedPreset(){
   state.wires=JSON.parse(JSON.stringify(p.state.wires||[]));
   state.motors=JSON.parse(JSON.stringify(p.state.motors||[]));
   state.pushbuttons=JSON.parse(JSON.stringify(p.state.pushbuttons||[]));
+  state.panels=JSON.parse(JSON.stringify(Array.isArray(p.state.panels)?p.state.panels:[]));
+  // В старых сохранениях две отдельные рейки были частью рабочего поля.
+  state.standaloneRails=p.state.standaloneRails!==false;
+  state.panels.forEach(function(panel){panel.railCount=panelRailCount(panel);panel.inletVoltage=panelInletVoltage(panel);panel.x=Number(panel.x)||0;panel.y=Number(panel.y)||0;});
+  state.clamps=JSON.parse(JSON.stringify(Array.isArray(p.state.clamps)?p.state.clamps:[]));
+  state.clamps.forEach(function(c,i){
+    c.id='CL'+(i+1);c.tag=c.tag||'PA'+(i+1);
+    c.x=Number(c.x)||0;c.y=Number(c.y)||0;c.drag=false;
+    const fraction=Number(c.fraction);c.fraction=Math.max(0,Math.min(1,isFinite(fraction)?fraction:.5));
+    if(!state.wires.some(function(w){return w.id===c.wireId;}))c.wireId=null;
+  });
+  clampState=null;
   state.specialProps=Object.assign({inbox:{tag:'XT1',customName:'Ввод 3×380 В',ratedVoltage:380,frequency:50},multimeter:{tag:'PV1',customName:'Цифровой мультиметр'}},JSON.parse(JSON.stringify(p.state.specialProps||{})));
   state.specialProps.inbox=Object.assign({tag:'XT1',customName:'Ввод 3×380 В',ratedVoltage:380,frequency:50},state.specialProps.inbox||{});
   state.special=Object.assign({inbox:true,pushbutton:false,motor:false,multimeter:true},p.state.special||{});
@@ -5452,6 +5772,7 @@ function loadSelectedPreset(){
 METER.x=875;METER.y=1080;METER.redX=1033;METER.redY=1022;METER.blackX=947;METER.blackY=1022;
     state.mm={mode:false,fn:'voltage',a:null,b:null};
   }
+  if(inboxSinglePhase())pruneInboxConnections();
   if(p.view&&isFinite(p.view.x)&&isFinite(p.view.y)&&isFinite(p.view.w)){
     view={x:p.view.x,y:p.view.y,w:p.view.w,h:p.view.h||p.view.w*VH/VW};clampView();applyView();
   }else resetView();
@@ -5640,6 +5961,288 @@ function initTerminalGuides(){
 /* ============================================================
    10. СТАРТ
    ============================================================ */
+/* Перенос щита перемещает ввод, рейки и установленные на них аппараты. */
+let panelDrag=null,panelDragFrame=0,panelDragPointer=null;
+const panelLayer=document.getElementById('panelLayer');
+function updatePanelDrag(){
+  if(!panelDrag||!panelDragPointer)return;
+  const panel=panelById(panelDrag.id);if(!panel)return;
+  const p=svgPoint(panelDragPointer);panelDragPointer=null;
+  panel.x=p.x-panelDrag.offX;panel.y=p.y-panelDrag.offY;
+  renderPanels();renderRail();renderInbox();renderDevices();renderRelays();renderTerminalGuides();renderWires();renderTerminals();renderClamp();
+}
+function startPanelDrag(evt,panel){
+  evt.preventDefault();evt.stopPropagation();cancelWire();
+  const p=svgPoint(evt);panelDrag={id:panel.id,offX:p.x-panel.x,offY:p.y-panel.y,pointerId:evt.pointerId};
+}
+panelLayer.addEventListener('pointerdown',function(evt){
+  if(evt.button!==0)return;
+  const body=evt.target.closest('[data-panel-id]'),panel=body&&panelById(body.dataset.panelId);if(!panel)return;
+  startPanelDrag(evt,panel);
+});
+document.addEventListener('pointermove',function(evt){
+  if(!panelDrag||evt.pointerId!==panelDrag.pointerId)return;
+  panelDragPointer={clientX:evt.clientX,clientY:evt.clientY};
+  if(!panelDragFrame)panelDragFrame=requestAnimationFrame(function(){panelDragFrame=0;updatePanelDrag();});
+});
+function finishPanelDrag(evt){
+  if(!panelDrag||evt.pointerId!==panelDrag.pointerId)return;
+  if(panelDragFrame){cancelAnimationFrame(panelDragFrame);panelDragFrame=0;}
+  if(evt.type!=='pointercancel'){panelDragPointer={clientX:evt.clientX,clientY:evt.clientY};updatePanelDrag();}
+  panelDrag=null;panelDragPointer=null;
+}
+document.addEventListener('pointerup',finishPanelDrag);
+document.addEventListener('pointercancel',finishPanelDrag);
+panelLayer.addEventListener('contextmenu',function(evt){
+  const body=evt.target.closest('[data-panel-id]');if(body)showObjectMenu(evt,{kind:'special',key:'panel',id:body.dataset.panelId});
+});
+/* Токовые клещи: ток ветви считается по нагрузкам и проводящим связям.
+   Малое одинаковое сопротивление проводов позволяет делить ток в параллельных путях. */
+let clampState=null;
+const clampLayer=document.getElementById('clampLayer');
+function createClamp(x,y){
+  const n=nextSpecialNumber(state.clamps,'CL');
+  const number=nextSpecialNumber(state.clamps.map(function(c){return {id:c.tag||''};}),'PA');
+  const c={id:'CL'+n,tag:'PA'+number,x:x,y:y,wireId:null,fraction:.5,drag:false};
+  state.clamps.push(c);return c;
+}
+function clampWireCurrents(){
+  const map=potentialMap(),result={};
+  if(map.conflict)return result;
+  const nodes=[],indices={},edges=[],injections=[];
+  function index(n){const k=nodeKey(n);if(indices[k]===undefined){indices[k]=nodes.length;nodes.push(n);injections.push({r:0,i:0});}return indices[k];}
+  function edge(a,b,g,id){edges.push({a:index(a),b:index(b),g:g,id:id});}
+  internalLinks().forEach(function(p){edge(p[0],p[1],1000,null);});
+  state.wires.forEach(function(w){edge(w.a,w.b,100,w.id);});
+  function inject(n,r,i){const j=index(n);injections[j].r+=r;injections[j].i+=i;}
+  function load(d,a,b,power,available){
+    if(!available)return;
+    const na={devId:d.id,key:a},nb={devId:d.id,key:b};
+    const va=map.pot[nodeKey(na)],vb=map.pot[nodeKey(nb)];
+    if(!va||!vb)return;
+    const r=va.r-vb.r,i=va.i-vb.i,u=Math.hypot(r,i);
+    if(!voltageIsOperating(u,d,220))return;
+    const resistance=Math.pow(ratedVoltageOf(d,220),2)/Math.max(.01,power);
+    inject(na,r/resistance,i/resistance);inject(nb,-r/resistance,-i/resistance);
+  }
+  state.devices.forEach(function(d){
+    if(d.type==='lamp')load(d,'t0','b0',Number(d.ratedPower)||1,!d.burned);
+    if(d.type==='bulb')load(d,'L','N',Number(d.ratedPower)||100,!d.burned);
+    if(TYPES[d.type].kind==='appliance')load(d,'L','N',Number(d.ratedPower)||TYPES[d.type].defaultPower,d.applianceOn&&!d.applianceBurned);
+    if(d.type==='km1')load(d,'A1','A2',Number(d.ratedPower)||8,!d.coilBurned);
+    if(d.type==='timer')load(d,'A1','A2',Number(d.ratedPower)||4,!d.timerBurned);
+  });
+  state.motors.forEach(function(m){
+    if(motorIsDc(m)){
+      const point=dcMotorOperatingPoint(m,map);
+      if(point.armatureDc&&point.armaturePresent){inject({devId:m.id,key:'ya1'},point.armatureCurrent,0);inject({devId:m.id,key:'ya2'},-point.armatureCurrent,0);}
+      if(point.fieldDc&&Math.abs(point.fieldVoltage)>1){const current=Math.sign(point.fieldVoltage)*point.fieldCurrent;inject({devId:m.id,key:'sh1'},current,0);inject({devId:m.id,key:'sh2'},-current,0);}
+      return;
+    }
+    const direction=motorPhaseDirection(m),current=motorOperatingPoint(m,direction).current;
+    if(!current)return;
+    ['U1','V1','W1'].forEach(function(key){
+      const n={devId:m.id,key:key},v=map.pot[nodeKey(n)];
+      if(v){const u=Math.hypot(v.r,v.i);if(u)inject(n,current*v.r/u,current*v.i/u);}
+    });
+  });
+  const count=nodes.length,adj=Array.from({length:count},function(){return [];});
+  edges.forEach(function(e){adj[e.a].push(e.b);adj[e.b].push(e.a);});
+  const pinned={},seen={};
+  nodes.forEach(function(n,j){
+    if(String(n.devId)==='IN')pinned[j]=true;
+    const d=devById(n.devId);
+    if(d&&d.type==='vfd'&&d.vfdOutputActive&&['U','V','W'].includes(n.key))pinned[j]=true;
+    if(d&&d.type==='tp'&&d.tpOn&&d.tpInputReady&&['ya1','ya2','sh1','sh2'].includes(n.key))pinned[j]=true;
+  });
+  // Каждому изолированному компоненту нужна одна опорная точка.
+  for(let start=0;start<count;start++){
+    if(seen[start])continue;
+    const queue=[start],component=[];seen[start]=true;
+    while(queue.length){const j=queue.pop();component.push(j);adj[j].forEach(function(k){if(!seen[k]){seen[k]=true;queue.push(k);}});}
+    if(!component.some(function(j){return pinned[j];}))pinned[start]=true;
+  }
+  const free=[],position={};nodes.forEach(function(n,j){if(!pinned[j]){position[j]=free.length;free.push(j);}});
+  const size=free.length;
+  const matrix=Array.from({length:size},function(_,j){const row=new Float64Array(size+2);row[size]=injections[free[j]].r;row[size+1]=injections[free[j]].i;return row;});
+  edges.forEach(function(e){
+    const a=position[e.a],b=position[e.b];
+    if(a!==undefined){matrix[a][a]+=e.g;if(b!==undefined)matrix[a][b]-=e.g;}
+    if(b!==undefined){matrix[b][b]+=e.g;if(a!==undefined)matrix[b][a]-=e.g;}
+  });
+  for(let col=0;col<size;col++){
+    let pivot=col;for(let j=col+1;j<size;j++)if(Math.abs(matrix[j][col])>Math.abs(matrix[pivot][col]))pivot=j;
+    if(Math.abs(matrix[pivot][col])<1e-10)continue;
+    const temp=matrix[col];matrix[col]=matrix[pivot];matrix[pivot]=temp;
+    for(let j=col+1;j<size;j++){
+      const ratio=matrix[j][col]/matrix[col][col];if(!ratio)continue;
+      for(let k=col;k<size+2;k++)matrix[j][k]-=ratio*matrix[col][k];
+    }
+  }
+  const real=new Float64Array(count),imag=new Float64Array(count);
+  for(let row=size-1;row>=0;row--){
+    let r=matrix[row][size],i=matrix[row][size+1];
+    for(let k=row+1;k<size;k++){r-=matrix[row][k]*real[free[k]];i-=matrix[row][k]*imag[free[k]];}
+    if(Math.abs(matrix[row][row])>1e-10){real[free[row]]=r/matrix[row][row];imag[free[row]]=i/matrix[row][row];}
+  }
+  edges.forEach(function(e){if(e.id!==null)result[e.id]=e.g*Math.hypot(real[e.a]-real[e.b],imag[e.a]-imag[e.b]);});
+  return result;
+}
+const clampPathCache=new WeakMap();
+function clampNearestWire(point){
+  let best=null;
+  wireLayer.querySelectorAll('[data-wid] .wire-hit').forEach(function(path){
+    let cached=clampPathCache.get(path);
+    const d=path.getAttribute('d');
+    if(!cached||cached.d!==d){
+      const length=path.getTotalLength();if(!length)return;
+      const count=Math.max(16,Math.min(2048,Math.ceil(length/8))),points=[];
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      for(let j=0;j<=count;j++){
+        const p=path.getPointAtLength(length*j/count);points.push({x:p.x,y:p.y});
+        minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
+      }
+      cached={d:d,length:length,points:points,step:length/count,minX:minX,minY:minY,maxX:maxX,maxY:maxY};
+      clampPathCache.set(path,cached);
+    }
+    if(point.x<cached.minX-16||point.x>cached.maxX+16||point.y<cached.minY-16||point.y>cached.maxY+16)return;
+    let distance=Infinity,at=0;
+    for(let j=1;j<cached.points.length;j++){
+      const a=cached.points[j-1],b=cached.points[j],dx=b.x-a.x,dy=b.y-a.y,den=dx*dx+dy*dy;
+      const t=den?Math.max(0,Math.min(1,((point.x-a.x)*dx+(point.y-a.y)*dy)/den)):0;
+      const gap=Math.hypot(a.x+t*dx-point.x,a.y+t*dy-point.y);
+      if(gap<distance){distance=gap;at=cached.step*(j-1+t);}
+    }
+    if(distance<16&&(!best||distance<best.distance))best={path:path,cached:cached,at:at,distance:distance};
+  });
+  if(!best)return null;
+  const path=best.path,length=best.cached.length;
+  let at=best.at,p=path.getPointAtLength(at),distance=Math.hypot(p.x-point.x,p.y-point.y),step=best.cached.step/2;
+  for(let j=0;j<6;j++){
+    for(const t of [Math.max(0,at-step),Math.min(length,at+step)]){
+      const q=path.getPointAtLength(t),gap=Math.hypot(q.x-point.x,q.y-point.y);
+      if(gap<distance){distance=gap;at=t;p=q;}
+    }
+    step/=2;
+  }
+  return distance<14?{id:Number(path.parentNode.dataset.wid),fraction:at/length,x:p.x,y:p.y,distance:distance,path:path}:null;
+}
+let clampDragFrame=0,clampDragPointer=null;
+function updateClampDrag(){
+  if(!clampState||!clampState.drag)return;
+  if(clampDragPointer){
+    const p=svgPoint(clampDragPointer);clampDragPointer=null;
+    if(isFinite(p.x)&&isFinite(p.y)){clampState.x=p.x-clampState.offX;clampState.y=p.y-clampState.offY;}
+  }
+  const body=clampLayer.querySelector('[data-clamp-id="'+clampState.id+'"]');
+  if(body)body.setAttribute('transform','translate('+clampState.x+','+clampState.y+')');
+  const candidate=clampNearestWire(clampState),highlight=clampLayer.querySelector('[data-clamp-highlight]');
+  if(highlight){highlight.setAttribute('d',candidate?candidate.path.getAttribute('d'):'');highlight.style.display=candidate?'':'none';}
+}
+function clampCurrentText(current){
+  const amps=Math.max(0,Number(current)||0);
+  if(amps<.000001)return '0.00 A';
+  if(amps<.1)return (amps*1000).toFixed(1)+' mA';
+  return amps.toFixed(2)+' A';
+}
+function clampJawSvg(open,angle,frontOnly){
+  const upper='M 24 -13 C 20 -26, -6 -29, -20 -17 C -25 -12, -27 -6, -27 0';
+  const lower='M 24 13 C 20 26, -6 29, -20 17 C -25 12, -27 6, -27 0';
+  function jaw(path,rotation,pivotY){
+    return '<g transform="rotate('+rotation+' 24 '+pivotY+')">'
+      +'<path d="'+path+'" fill="none" stroke="#92430e" stroke-width="11" stroke-linecap="round"/>'
+      +'<path d="'+path+'" fill="none" stroke="#f58220" stroke-width="8" stroke-linecap="round"/>'
+      +'</g>';
+  }
+  return '<g transform="rotate('+angle+')">'
+    +(frontOnly?'':jaw(upper,open?22:0,-13))
+    +jaw(lower,open?-22:0,13)+'</g>';
+}
+function clampObjectSvg(clampState,currents){
+  let wirePath=null,ringAngle=0;
+  if(clampState.wireId!==null){
+    const path=wireLayer.querySelector('[data-wid="'+clampState.wireId+'"] .wire-hit');
+    if(path){
+      const length=path.getTotalLength(),at=length*clampState.fraction;
+      const p=path.getPointAtLength(at),before=path.getPointAtLength(Math.max(0,at-1)),after=path.getPointAtLength(Math.min(length,at+1));
+      clampState.x=p.x;clampState.y=p.y;wirePath=path;
+      ringAngle=8*Math.sin(2*Math.atan2(after.y-before.y,after.x-before.x));
+    }
+    else clampState.wireId=null;
+  }
+  const attached=clampState.wireId!==null;
+  const text=attached?clampCurrentText(currents[clampState.wireId]):'— A';
+  let ring='';
+  if(attached&&wirePath){
+    // Задняя половина кольца находится за проводом, передняя — перед ним.
+    // Ориентация кольца следует касательной даже на дугах провода.
+    const wire=state.wires.find(function(w){return w.id===clampState.wireId;});
+    const a=wire&&terminal(wire.a.devId,wire.a.key);
+    const color=wire&&(wire.color||(a&&a.color))||'#1c1c1c';
+    // Окно включает всю толщину губок с запасом: граница не режет провод
+    // в месте пересечения с внешним краем задней губки.
+    const clipId='clamp-wire-window-'+clampState.id;
+    ring='<defs><clipPath id="'+clipId+'" clipPathUnits="userSpaceOnUse"><rect x="-44" y="-44" width="88" height="88" transform="rotate('+ringAngle+')"/></clipPath></defs>'
+      +clampJawSvg(false,ringAngle,false)
+      +'<g clip-path="url(#'+clipId+')" pointer-events="none"><g transform="translate('+(-clampState.x)+','+(-clampState.y)+')">'
+      +wireStrokeGeom(wirePath.getAttribute('d'),color,null,false)+'</g></g>'
+      +clampJawSvg(false,ringAngle,true);
+  }else{
+    ring=clampJawSvg(clampState.drag,0,false);
+  }
+  return '<g data-clamp-id="'+clampState.id+'" transform="translate('+clampState.x+','+clampState.y+')" style="cursor:grab;touch-action:none">'
+    +ring
+    +'<path d="M 20 -17 Q 29 -24 39 -19 V 19 Q 29 24 20 17 Z" fill="#24282c" stroke="#555b62" stroke-width="1.5"/>'
+    +'<rect x="33" y="-27" width="98" height="54" rx="8" fill="#202428" stroke="#626971" stroke-width="1.5"/>'
+    +'<rect x="38" y="-22" width="88" height="44" rx="5" fill="#30363b" stroke="#41484f"/>'
+    +'<text x="82" y="-17" text-anchor="middle" font-family="Segoe UI,Arial" font-size="5" fill="#ced4d9">'+escapeHtml(clampState.tag||'PA')+'</text>'
+    +'<rect x="42" y="-15" width="80" height="28" rx="3" fill="#b9c8b5" stroke="#101518" stroke-width="2"/>'
+    +'<text x="82" y="4" text-anchor="middle" font-family="Consolas,monospace" font-size="15" fill="#26332c">'+text+'</text>'
+    +'<text x="82" y="22" text-anchor="middle" font-family="Segoe UI,Arial" font-size="6" fill="#ced4d9">'+(attached?'ТОК · RMS':(clampState.drag?'КЛЕЩИ ОТКРЫТЫ':'АМПЕРМЕТР'))+'</text>'
+    +'<rect x="28" y="14" width="10" height="9" rx="2" fill="#f58220" stroke="#92430e"/>'
+    +'<circle r="32" fill="transparent" pointer-events="all"/>'
+    +'</g>';
+}
+function renderClamp(force){
+  if(!clampLayer)return;
+  if(clampState&&clampState.drag&&!force){updateClampDrag();return;}
+  const currents=state.clamps.some(function(c){return c.wireId!==null;})?clampWireCurrents():{};
+  const highlight='<path data-clamp-highlight="1" d="" style="display:none" fill="none" stroke="#f6ce64" stroke-width="11" stroke-opacity=".28" stroke-linecap="round" pointer-events="none"/>';
+  clampLayer.innerHTML=highlight+state.clamps.map(function(c){return clampObjectSvg(c,currents);}).join('');
+  if(clampState&&clampState.drag)updateClampDrag();
+}
+clampLayer.addEventListener('pointerdown',function(evt){
+  if(evt.button!==0)return;
+  const body=evt.target.closest('[data-clamp-id]');if(!body)return;
+  clampState=state.clamps.find(function(c){return c.id===body.dataset.clampId;});if(!clampState)return;
+  evt.preventDefault();evt.stopPropagation();cancelWire();
+  const p=svgPoint(evt);clampState.offX=p.x-clampState.x;clampState.offY=p.y-clampState.y;
+  clampState.wireId=null;clampState.drag=true;
+  renderClamp(true);
+});
+document.addEventListener('pointermove',function(evt){
+  if(!clampState||!clampState.drag)return;
+  clampDragPointer={clientX:evt.clientX,clientY:evt.clientY};
+  if(!clampDragFrame)clampDragFrame=requestAnimationFrame(function(){clampDragFrame=0;updateClampDrag();});
+},true);
+document.addEventListener('pointerup',function(evt){
+  if(!clampState||!clampState.drag)return;
+  if(clampDragFrame){cancelAnimationFrame(clampDragFrame);clampDragFrame=0;}
+  clampDragPointer={clientX:evt.clientX,clientY:evt.clientY};updateClampDrag();
+  clampState.drag=false;
+  const hit=clampNearestWire(clampState);
+  if(hit){clampState.wireId=hit.id;clampState.fraction=hit.fraction;clampState.x=hit.x;clampState.y=hit.y;}
+  renderClamp();
+},true);
+clampLayer.addEventListener('contextmenu',function(evt){
+  const body=evt.target.closest('[data-clamp-id]');if(body)showObjectMenu(evt,{kind:'special',key:'clamp',id:body.dataset.clampId});
+});
+document.addEventListener('pointercancel',function(){
+  if(!clampState||!clampState.drag)return;
+  if(clampDragFrame){cancelAnimationFrame(clampDragFrame);clampDragFrame=0;}
+  clampDragPointer=null;clampState.drag=false;renderClamp();
+},true);
+setInterval(function(){if(state.clamps.length&&(!clampState||!clampState.drag))renderClamp();},500);
 initWireDefaults();
 initTerminalGuides();
 renderRail();
@@ -5648,6 +6251,6 @@ resetView();
 renderAll();
 renderPresetList();
 initLogPanel();
-log('Тренажёр запущен: рабочее поле очищено, на сцене две DIN-рейки и ввод XT1 с напряжением 3×380 В, N и PE.', 'info');
+log('Тренажёр запущен: на сцене монтажный щит с двумя DIN-рейками и встроенным вводом XT1 — 3×380 В, N и PE.', 'info');
 
 })();
