@@ -1,0 +1,738 @@
+{
+  "format": "ad-trainer-scheme",
+  "version": 1,
+  "exported": "2026-09-27T09:52:50.441Z",
+  "preset": {
+    "version": 1,
+    "id": "scheme-mujn1xu3",
+    "name": "Пуск-реверс АД 3Ф",
+    "updated": 1790502767381,
+    "state": {
+      "power": true,
+      "devices": [
+        {
+          "id": 1,
+          "type": "klemma",
+          "rail": 0,
+          "slot": 9,
+          "on": false,
+          "tripped": false,
+          "coil": false
+        },
+        {
+          "id": 2,
+          "type": "mcb3",
+          "rail": 0,
+          "slot": 2,
+          "on": false,
+          "tripped": false,
+          "coil": false
+        },
+        {
+          "id": 3,
+          "type": "mcb1",
+          "rail": 0,
+          "slot": 5,
+          "on": false,
+          "tripped": false,
+          "coil": false
+        },
+        {
+          "id": 4,
+          "type": "km1",
+          "rail": 1,
+          "slot": 2,
+          "on": false,
+          "tripped": false,
+          "coil": false,
+          "coilU": 0,
+          "coilAnim": false
+        },
+        {
+          "id": 6,
+          "type": "lamp",
+          "rail": 0,
+          "slot": 7,
+          "on": false,
+          "tripped": false,
+          "coil": false,
+          "indicator": "green",
+          "tag": "HL1"
+        },
+        {
+          "id": 7,
+          "type": "km1",
+          "rail": 1,
+          "slot": 6,
+          "on": false,
+          "tripped": false,
+          "coil": false,
+          "coilU": 0,
+          "coilAnim": false
+        },
+        {
+          "id": 9,
+          "type": "lamp",
+          "rail": 0,
+          "slot": 8,
+          "on": false,
+          "tripped": false,
+          "coil": false,
+          "indicator": "yellow",
+          "tag": "HL2"
+        },
+        {
+          "id": 10,
+          "type": "lamp",
+          "rail": 0,
+          "slot": 6,
+          "on": false,
+          "tripped": false,
+          "coil": false,
+          "indicator": "red",
+          "tag": "HL3"
+        },
+        {
+          "id": 11,
+          "type": "pebus",
+          "rail": 0,
+          "slot": 10,
+          "on": false,
+          "tripped": false,
+          "coil": false
+        }
+      ],
+      "relays": [
+        {
+          "id": 5,
+          "kmId": 4,
+          "tripped": false,
+          "set": 25,
+          "tested": false,
+          "heat": 0
+        },
+        {
+          "id": 8,
+          "kmId": 7,
+          "tripped": false,
+          "set": 25,
+          "tested": false,
+          "heat": 0
+        }
+      ],
+      "wires": [
+        {
+          "id": 1,
+          "a": {
+            "devId": "IN",
+            "key": "L1"
+          },
+          "b": {
+            "devId": 2,
+            "key": "t0"
+          }
+        },
+        {
+          "id": 2,
+          "a": {
+            "devId": "IN",
+            "key": "L2"
+          },
+          "b": {
+            "devId": 2,
+            "key": "t1"
+          }
+        },
+        {
+          "id": 3,
+          "a": {
+            "devId": "IN",
+            "key": "L3"
+          },
+          "b": {
+            "devId": 2,
+            "key": "t2"
+          }
+        },
+        {
+          "id": 4,
+          "a": {
+            "devId": 2,
+            "key": "b0"
+          },
+          "b": {
+            "devId": 4,
+            "key": "t0"
+          }
+        },
+        {
+          "id": 5,
+          "a": {
+            "devId": 2,
+            "key": "b1"
+          },
+          "b": {
+            "devId": 4,
+            "key": "t1"
+          }
+        },
+        {
+          "id": 6,
+          "a": {
+            "devId": 2,
+            "key": "b2"
+          },
+          "b": {
+            "devId": 4,
+            "key": "t2"
+          }
+        },
+        {
+          "id": 7,
+          "a": {
+            "devId": "IN",
+            "key": "L3"
+          },
+          "b": {
+            "devId": 3,
+            "key": "t0"
+          }
+        },
+        {
+          "id": 9,
+          "a": {
+            "devId": "IN",
+            "key": "N"
+          },
+          "b": {
+            "devId": 1,
+            "key": "k0"
+          }
+        },
+        {
+          "id": 11,
+          "a": {
+            "devId": "IN",
+            "key": "PE"
+          },
+          "b": {
+            "devId": 11,
+            "key": "k0"
+          }
+        },
+        {
+          "id": 13,
+          "a": {
+            "devId": 4,
+            "key": "t0"
+          },
+          "b": {
+            "devId": 7,
+            "key": "t0"
+          },
+          "pts": [],
+          "shape": "arc"
+        },
+        {
+          "id": 14,
+          "a": {
+            "devId": 4,
+            "key": "t1"
+          },
+          "b": {
+            "devId": 7,
+            "key": "t2"
+          },
+          "pts": [],
+          "shape": "arc"
+        },
+        {
+          "id": 15,
+          "a": {
+            "devId": 4,
+            "key": "t2"
+          },
+          "b": {
+            "devId": 7,
+            "key": "t1"
+          },
+          "pts": [],
+          "shape": "arc"
+        },
+        {
+          "id": 16,
+          "a": {
+            "devId": "kk5",
+            "key": "p0"
+          },
+          "b": {
+            "devId": "kk8",
+            "key": "p0"
+          },
+          "pts": [
+            {
+              "x": 316.41981964111324,
+              "y": 1019.2181986490885
+            }
+          ],
+          "shape": "arc"
+        },
+        {
+          "id": 17,
+          "a": {
+            "devId": "kk5",
+            "key": "p1"
+          },
+          "b": {
+            "devId": "kk8",
+            "key": "p1"
+          },
+          "pts": [
+            {
+              "x": 367.3065038045247,
+              "y": 1020.8597045898438
+            }
+          ],
+          "shape": "arc"
+        },
+        {
+          "id": 18,
+          "a": {
+            "devId": "kk5",
+            "key": "p2"
+          },
+          "b": {
+            "devId": "kk8",
+            "key": "p2"
+          },
+          "pts": [
+            {
+              "x": 406.70264638264973,
+              "y": 1015.1144337972006
+            }
+          ],
+          "shape": "arc"
+        },
+        {
+          "id": 19,
+          "a": {
+            "devId": "kk8",
+            "key": "p0"
+          },
+          "b": {
+            "devId": "M1",
+            "key": "U1"
+          },
+          "pts": []
+        },
+        {
+          "id": 20,
+          "a": {
+            "devId": "kk8",
+            "key": "p1"
+          },
+          "b": {
+            "devId": "M1",
+            "key": "V1"
+          },
+          "pts": []
+        },
+        {
+          "id": 22,
+          "a": {
+            "devId": 3,
+            "key": "b0"
+          },
+          "b": {
+            "devId": 10,
+            "key": "b0"
+          },
+          "pts": [
+            {
+              "x": 403.97835235595716,
+              "y": 377.2259755452475
+            }
+          ],
+          "shape": "arc"
+        },
+        {
+          "id": 23,
+          "a": {
+            "devId": 10,
+            "key": "t0"
+          },
+          "b": {
+            "devId": 6,
+            "key": "t0"
+          },
+          "pts": [],
+          "shape": "arc",
+          "color": "#2a6fd6"
+        },
+        {
+          "id": 24,
+          "a": {
+            "devId": 6,
+            "key": "t0"
+          },
+          "b": {
+            "devId": 9,
+            "key": "t0"
+          },
+          "pts": [],
+          "shape": "arc",
+          "color": "#2a6fd6"
+        },
+        {
+          "id": 25,
+          "a": {
+            "devId": 9,
+            "key": "t0"
+          },
+          "b": {
+            "devId": 1,
+            "key": "k0"
+          },
+          "pts": [],
+          "color": "#2a6fd6",
+          "shape": "arc"
+        },
+        {
+          "id": 28,
+          "a": {
+            "devId": 3,
+            "key": "b0"
+          },
+          "b": {
+            "devId": "PB",
+            "key": "stopR"
+          },
+          "pts": [
+            {
+              "x": 453.1675624847411,
+              "y": 450.09088745117185
+            },
+            {
+              "x": 969.7595905303955,
+              "y": 629.33724416097
+            }
+          ]
+        },
+        {
+          "id": 29,
+          "a": {
+            "devId": "PB",
+            "key": "stopL"
+          },
+          "b": {
+            "devId": 7,
+            "key": "a62"
+          },
+          "pts": []
+        },
+        {
+          "id": 30,
+          "a": {
+            "devId": 7,
+            "key": "a61"
+          },
+          "b": {
+            "devId": "PB",
+            "key": "upR"
+          },
+          "pts": [
+            {
+              "x": 930.4268860816956,
+              "y": 679.2313776016235
+            }
+          ],
+          "color": "#d32f2f"
+        },
+        {
+          "id": 31,
+          "a": {
+            "devId": "PB",
+            "key": "upL"
+          },
+          "b": {
+            "devId": 4,
+            "key": "A1"
+          },
+          "pts": []
+        },
+        {
+          "id": 32,
+          "a": {
+            "devId": 7,
+            "key": "a61"
+          },
+          "b": {
+            "devId": 4,
+            "key": "a54"
+          },
+          "pts": [
+            {
+              "x": 352.57852506637573,
+              "y": 673.7726211547852
+            }
+          ],
+          "shape": "arc",
+          "color": "#d32f2f"
+        },
+        {
+          "id": 33,
+          "a": {
+            "devId": 4,
+            "key": "a53"
+          },
+          "b": {
+            "devId": 4,
+            "key": "A1"
+          },
+          "pts": [],
+          "shape": "s"
+        },
+        {
+          "id": 34,
+          "a": {
+            "devId": "kk5",
+            "key": "r3"
+          },
+          "b": {
+            "devId": "kk8",
+            "key": "r3"
+          },
+          "pts": [
+            {
+              "x": 478.5416854222616,
+              "y": 936.4129332224529
+            }
+          ],
+          "shape": "arc"
+        },
+        {
+          "id": 35,
+          "a": {
+            "devId": "kk8",
+            "key": "r3"
+          },
+          "b": {
+            "devId": 1,
+            "key": "k5"
+          },
+          "pts": [
+            {
+              "x": 618.5459895133972,
+              "y": 732.1004114151001
+            }
+          ]
+        },
+        {
+          "id": 37,
+          "a": {
+            "devId": "PB",
+            "key": "stopL"
+          },
+          "b": {
+            "devId": 4,
+            "key": "a62"
+          },
+          "pts": [],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 38,
+          "a": {
+            "devId": 4,
+            "key": "a61"
+          },
+          "b": {
+            "devId": "PB",
+            "key": "downR"
+          },
+          "pts": [
+            {
+              "x": 382.4586351076763,
+              "y": 573.4365956624349
+            },
+            {
+              "x": 995.4545253753663,
+              "y": 594.0677284240722
+            }
+          ],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 39,
+          "a": {
+            "devId": "PB",
+            "key": "downL"
+          },
+          "b": {
+            "devId": 7,
+            "key": "A1"
+          },
+          "pts": [],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 40,
+          "a": {
+            "devId": 4,
+            "key": "a61"
+          },
+          "b": {
+            "devId": 7,
+            "key": "a54"
+          },
+          "pts": [],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 41,
+          "a": {
+            "devId": 7,
+            "key": "a53"
+          },
+          "b": {
+            "devId": 7,
+            "key": "A1"
+          },
+          "pts": [],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 42,
+          "a": {
+            "devId": 7,
+            "key": "A2"
+          },
+          "b": {
+            "devId": "kk8",
+            "key": "r2"
+          },
+          "pts": [
+            {
+              "x": 562.9558500607809,
+              "y": 842.020143699646
+            }
+          ]
+        },
+        {
+          "id": 43,
+          "a": {
+            "devId": 4,
+            "key": "a53"
+          },
+          "b": {
+            "devId": 6,
+            "key": "b0"
+          },
+          "pts": []
+        },
+        {
+          "id": 44,
+          "a": {
+            "devId": 7,
+            "key": "a53"
+          },
+          "b": {
+            "devId": 9,
+            "key": "b0"
+          },
+          "pts": [],
+          "color": "#1f9d3a"
+        },
+        {
+          "id": 45,
+          "a": {
+            "devId": "M1",
+            "key": "PE"
+          },
+          "b": {
+            "devId": 11,
+            "key": "k5"
+          },
+          "pts": [
+            {
+              "x": 1159.4500701904294,
+              "y": 1268.344482421875
+            },
+            {
+              "x": 1137.2884964625039,
+              "y": 475.74458910624185
+            }
+          ]
+        },
+        {
+          "id": 46,
+          "a": {
+            "devId": 4,
+            "key": "A2"
+          },
+          "b": {
+            "devId": "kk5",
+            "key": "r2"
+          },
+          "pts": [
+            {
+              "x": 359.7066484451293,
+              "y": 848.4720054626465
+            }
+          ]
+        },
+        {
+          "id": 48,
+          "a": {
+            "devId": "kk8",
+            "key": "p2"
+          },
+          "b": {
+            "devId": "M1",
+            "key": "W1"
+          },
+          "pts": []
+        }
+      ],
+      "nextId": 12,
+      "special": {
+        "inbox": true,
+        "pushbutton": true,
+        "motor": true,
+        "multimeter": true
+      }
+    },
+    "positions": {
+      "inbox": {
+        "x": 90,
+        "y": -194
+      },
+      "pushbutton": {
+        "x": 763.6837327321372,
+        "y": 704.1350659052531
+      },
+      "motor": {
+        "x": 417.3404304504395,
+        "y": 1075.4222840627035,
+        "load": 0
+      },
+      "multimeter": {
+        "x": 1255.7825251261388,
+        "y": 357.2178679148359,
+        "redX": 1416.4926434834792,
+        "redY": 303.9605750401821,
+        "blackX": 1327.7825251261388,
+        "blackY": 299.2178679148359,
+        "fn": "voltage",
+        "a": null,
+        "b": null
+      }
+    },
+    "view": {
+      "x": -170.86879263545856,
+      "y": -40,
+      "w": 1318.7835941966985,
+      "h": 1648.4794927458731
+    }
+  }
+}

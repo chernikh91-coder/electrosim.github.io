@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тренажёр-стенд «Пуск-реверс трёхфазного АД» — Этап 1: вводные автоматы</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<main>
+  <!-- ================= СЦЕНА ================= -->
+  <section class="stage">
+    <svg id="scene" viewBox="0 0 1240 1550" preserveAspectRatio="xMidYMid meet">
+      <g id="world" transform="translate(0,200)">
+      <g id="railLayer"></g>
+      <g id="guideLayer"></g>
+      <g id="motorLayer"></g>
+      <g id="deviceLayer"></g>
+      <g id="relayLayer"></g>
+      <g id="boxLayer"></g>
+      <g id="wireLayer"></g>
+      <g id="termLayer"></g>
+      <g id="mmLayer"></g>
+      </g>
+    </svg>
+    <div class="zoomctl">
+      <button id="zin" title="Приблизить">+</button>
+      <button id="zout" title="Отдалить">−</button>
+      <button id="zfit" title="Показать весь стенд">⤢</button>
+      <span id="zval">100%</span>
+    </div>
+    <div class="wire-defaults" aria-label="Настройки новых проводов">
+      <div class="wire-defaults-title">Новый провод</div>
+      <div class="wire-defaults-menu">
+        <div class="wire-default-sub" id="wireShapeDefault">
+          <button type="button" class="wire-default-trigger"><span class="wire-trigger-title">Форма провода</span><i class="wire-current-shape">∿</i><span class="wire-trigger-arrow">▶</span></button>
+          <div class="wire-default-flyout" aria-label="Форма провода">
+            <button type="button" data-wire-default-shape="smooth"><i>∿</i>Плавная кривая</button>
+            <button type="button" data-wire-default-shape="straight"><i>╱</i>Прямые отрезки</button>
+            <button type="button" data-wire-default-shape="orthogonal"><i>└</i>Прямые углы</button>
+            <button type="button" data-wire-default-shape="arc"><i>⌒</i>Дуга-перемычка</button>
+            <button type="button" data-wire-default-shape="s"><i>𝑆</i>S-образный изгиб</button>
+          </div>
+        </div>
+        <div class="wire-default-sub" id="wireColorDefault">
+          <button type="button" class="wire-default-trigger"><span class="wire-trigger-title">Цвет провода</span><i class="wire-current-color"></i><span class="wire-trigger-arrow">▶</span></button>
+          <div class="wire-default-flyout" aria-label="Цвет провода">
+            <button type="button" data-wire-default-color="#1c1c1c"><i></i>Чёрный</button>
+            <button type="button" data-wire-default-color="#8b5a2b"><i></i>Коричневый</button>
+            <button type="button" data-wire-default-color="#d32f2f"><i></i>Красный</button>
+            <button type="button" data-wire-default-color="#f28c28"><i></i>Оранжевый</button>
+            <button type="button" data-wire-default-color="#e0b800"><i></i>Жёлтый</button>
+            <button type="button" data-wire-default-color="#1f9d3a"><i></i>Зелёный</button>
+            <button type="button" data-wire-default-color="#2a6fd6"><i></i>Синий</button>
+            <button type="button" data-wire-default-color="#36a9e1"><i></i>Голубой</button>
+            <button type="button" data-wire-default-color="#8d939a"><i></i>Серый</button>
+            <button type="button" data-wire-default-color="#f3f3f3"><i></i>Белый</button>
+            <button type="button" data-wire-default-color="#e8d800"><i class="pe-swatch"></i>Жёлто-зелёный</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" id="guideToggle" class="guide-toggle" aria-pressed="false"><i></i><span>Направляющие клемм</span></button>
+    </div>
+  </section>
+
+  <!-- ========== СВОРАЧИВАЕМОЕ МЕНЮ ========== -->
+  <aside class="side">
+    <details class="side-menu-item">
+      <summary><span class="menu-logo">АД</span><span>Стенд</span></summary>
+      <div class="side-flyout about-flyout">
+        <div class="side-title">
+          <div class="side-logo">АД</div>
+          <div>
+            <h1>Тренажёр-стенд</h1>
+            <strong>Пуск и реверс трёхфазного асинхронного двигателя</strong>
+            <span>Ввод, защита и магнитные пускатели</span>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="side-menu-item">
+      <summary><span class="menu-icon">▦</span><span>Детали</span></summary>
+      <div class="side-flyout">
+        <div class="card">
+          <h2>Лоток деталей</h2>
+          <div id="tray"></div>
+        </div>
+      </div>
+    </details>
+
+    <details class="side-menu-item">
+      <summary><span class="menu-icon">▤</span><span>Схемы</span></summary>
+      <div class="side-flyout">
+        <div class="card preset-card">
+          <h2>Сохранённые схемы</h2>
+          <input id="presetName" class="preset-name" type="text" maxlength="60" placeholder="Название схемы">
+          <button id="presetSave" class="preset-primary">Сохранить текущую схему</button>
+          <select id="presetList" class="preset-list" size="5" aria-label="Сохранённые схемы"></select>
+          <div class="preset-actions">
+            <button id="presetLoad">Загрузить</button>
+            <button id="presetDelete" class="preset-danger">Удалить</button>
+          </div>
+          <div class="preset-actions">
+            <button id="presetExport">Экспорт выбранной</button>
+            <button id="presetExportAll">Экспорт всех</button>
+          </div>
+          <label class="preset-import" for="presetImportFile">Импортировать из файла</label>
+          <input id="presetImportFile" type="file" accept=".json,.ad-scheme.json,application/json" hidden>
+          <div id="presetStatus" class="preset-status">Схемы хранятся локально в этом браузере.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="side-menu-item">
+      <summary><span class="menu-icon">☰</span><span>Протокол</span></summary>
+      <div class="side-flyout">
+        <div class="card log-card">
+          <h2>Протокол испытаний</h2>
+          <div id="logFilters" class="log-filters" role="group" aria-label="Фильтр протокола">
+            <button type="button" data-log-filter="fault" aria-pressed="false">Аварии</button>
+            <button type="button" data-log-filter="work" aria-pressed="true" class="on">Аварии и действия</button>
+            <button type="button" data-log-filter="all" aria-pressed="false">Всё</button>
+          </div>
+          <div class="log-summary">
+            <span id="logCount">Записей: 0</span>
+            <span id="logFaultCount" class="fault clean">Аварий и предупреждений: 0</span>
+          </div>
+          <div id="log"></div>
+          <div class="log-actions">
+            <button id="logExport">Выгрузить в файл</button>
+            <button id="logClear" class="danger">Очистить</button>
+          </div>
+          <div class="log-hint">Протокол сохраняется вместе со схемой в разделе «Схемы» и переносится вместе с экспортом.</div>
+        </div>
+      </div>
+    </details>
+  </aside>
+</main>
+
+<div id="toast"></div>
+<div id="wireMenu" class="ctxmenu">
+  <button data-act="add">Добавить точку изгиба</button>
+  <button data-act="del">Удалить точку изгиба</button>
+  <div class="menu-sub">
+    <button class="submenu-trigger">Изменить форму провода <span>▶</span></button>
+    <div class="wire-shapes" aria-label="Форма провода">
+      <button data-wire-shape="smooth"><i>∿</i>Плавная кривая</button>
+      <button data-wire-shape="straight"><i>╱</i>Прямые отрезки</button>
+      <button data-wire-shape="orthogonal"><i>└</i>Прямые углы</button>
+      <button data-wire-shape="arc"><i>⌒</i>Дуга-перемычка</button>
+      <button data-wire-shape="s"><i>𝑆</i>S-образный изгиб</button>
+    </div>
+  </div>
+  <div class="menu-sub">
+    <button class="submenu-trigger">Изменить цвет провода <span>▶</span></button>
+    <div class="wire-palette" aria-label="Цвет провода">
+      <button data-wire-color="#1c1c1c" title="Чёрный"><i style="background:#1c1c1c"></i>Чёрный</button>
+      <button data-wire-color="#8b5a2b" title="Коричневый"><i style="background:#8b5a2b"></i>Коричневый</button>
+      <button data-wire-color="#d32f2f" title="Красный"><i style="background:#d32f2f"></i>Красный</button>
+      <button data-wire-color="#f28c28" title="Оранжевый"><i style="background:#f28c28"></i>Оранжевый</button>
+      <button data-wire-color="#e0b800" title="Жёлтый"><i style="background:#e0b800"></i>Жёлтый</button>
+      <button data-wire-color="#1f9d3a" title="Зелёный"><i style="background:#1f9d3a"></i>Зелёный</button>
+      <button data-wire-color="#2a6fd6" title="Синий"><i style="background:#2a6fd6"></i>Синий</button>
+      <button data-wire-color="#36a9e1" title="Голубой"><i style="background:#36a9e1"></i>Голубой</button>
+      <button data-wire-color="#8d939a" title="Серый"><i style="background:#8d939a"></i>Серый</button>
+      <button data-wire-color="#f3f3f3" title="Белый"><i style="background:#f3f3f3"></i>Белый</button>
+      <button data-wire-color="#e8d800" title="Жёлто-зелёный PE"><i class="pe-swatch"></i>Жёлто-зелёный</button>
+    </div>
+  </div>
+  <button data-act="remove" class="danger">Удалить провод</button>
+</div>
+
+<div id="objectMenu" class="ctxmenu object-menu">
+  <button data-object-act="properties">Характеристики</button>
+  <button data-object-act="remove" class="danger">Удалить объект</button>
+</div>
+
+<div id="propertiesModal" class="properties-modal" aria-hidden="true">
+  <div class="properties-dialog" role="dialog" aria-modal="true" aria-labelledby="propertiesTitle">
+    <div class="properties-head">
+      <div>
+        <h2 id="propertiesTitle">Характеристики объекта</h2>
+        <div id="propertiesSubtitle" class="properties-subtitle"></div>
+      </div>
+      <button id="propertiesClose" class="properties-close" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <form id="propertiesForm">
+      <div id="propertiesFields" class="properties-fields"></div>
+      <div class="properties-actions">
+        <button id="propertiesCancel" type="button">Отмена</button>
+        <button class="primary" type="submit">Сохранить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
