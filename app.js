@@ -9,7 +9,7 @@ const RAIL_H    = 35 * MM;           // высота рейки (35 мм)
 const RAILS     = [235, 635];        // оси верхней и опущенной нижней DIN-рейки
 const MODULE    = 17.5 * MM;         // один модуль 17,5 мм
 const RAIL_X0   = 90;
-const SLOTS     = 20;
+const SLOTS     = 16;                 // щит на 16 модулей: на 20% уже прежних 20 модулей
 const RAIL_X1   = RAIL_X0 + SLOTS * MODULE;
 const VW        = 1240, VH = 1550;   // увеличенное поле снизу для осмотра двигателя
 const RELAY_DROP = 0;                // реле стыкуется снизу вплотную (надписи клемм пускателя видны)
@@ -21,8 +21,8 @@ const WC = { L1:'#8b5a2b', L2:'#1c1c1c', L3:'#8d939a', N:'#2a6fd6', PE:'#e8d800'
 const WCF = { L1:'#d32f2f', L2:'#e0b800', L3:'#1f9d3a', N:'#2a6fd6', PE:'#e8d800' };
 const wireDefaults = { shape:'smooth', color:'#1c1c1c' };
 /* обозначения аппаратов на стенде */
-const TAGS = { klemma:'XN', pebus:'XPE', mcb3:'QF1', mcb1:'QF2', rcd:'QD1', meter:'PI1', sensor:'PVA1', lamp:'HL1', bulb:'EL1', outlet:'XS1', wallSwitch:'SA1', twoWaySwitch:'SA1', fridge:'E1', washer:'E1', boiler:'E1', stove:'E1', vfd:'UZ1', tp:'UZT1', km1:'KM1', kk1:'KK1', timer:'KT1', M1:'M1', IN:'XT1', PB:'SB1–SB3' };
-const TAG_PREFIX = { klemma:'XN', pebus:'XPE', mcb3:'QF', mcb1:'QF', rcd:'QD', meter:'PI', sensor:'PVA', lamp:'HL', bulb:'EL', outlet:'XS', wallSwitch:'SA', twoWaySwitch:'SA', fridge:'E', washer:'E', boiler:'E', stove:'E', vfd:'UZ', tp:'UZT', km1:'KM', kk1:'KK', timer:'KT' };
+const TAGS = { klemma:'XN', pebus:'XPE', mcb3:'QF1', mcb1:'QF2', rcd:'QD1', meter:'PI1', sensor:'PVA1', lamp:'HL1', bulb:'EL1', outlet:'XS1', wallSwitch:'SA1', twoWaySwitch:'SA1', fridge:'E1', washer:'E1', boiler:'E1', stove:'E1', split:'E1', vfd:'UZ1', tp:'UZT1', km1:'KM1', kk1:'KK1', timer:'KT1', M1:'M1', IN:'XT1', PB:'SB1–SB3' };
+const TAG_PREFIX = { klemma:'XN', pebus:'XPE', mcb3:'QF', mcb1:'QF', rcd:'QD', meter:'PI', sensor:'PVA', lamp:'HL', bulb:'EL', outlet:'XS', wallSwitch:'SA', twoWaySwitch:'SA', fridge:'E', washer:'E', boiler:'E', stove:'E', split:'E', vfd:'UZ', tp:'UZT', km1:'KM', kk1:'KK', timer:'KT' };
 /* клеммная коробка ввода (в исходном щите, слева сверху): болты окрашены
    в цвета подходящих проводов — L1 красный, L2 жёлтый, L3 зелёный, N синий, PE жёлто-зелёный */
 const INBOX = { x:90, y:-194, w:240, h:120 };
@@ -61,13 +61,14 @@ const TYPES = {
   washer: { title:'Стиральная машина', modules:3, h:60*MM, kind:'appliance', freeOnly:true, defaultPower:2200 },
   boiler: { title:'Бойлер', modules:3, h:60*MM, kind:'appliance', freeOnly:true, defaultPower:2000 },
   stove:  { title:'Электрическая плита', modules:3, h:60*MM, kind:'appliance', freeOnly:true, defaultPower:7000 },
+  split:  { title:'Сплит-система', modules:3, h:60*MM, kind:'appliance', freeOnly:true, defaultPower:1500 },
   vfd:    { title:'Частотный преобразователь UZ, 3×380 В', modules:4, h:110*MM, kind:'vfd' },
   tp:     { title:'Тиристорный преобразователь, 3×380 В', modules:4, h:82*MM, kind:'converter' },
   timer:  { title:'Реле времени KT1, 220 В', modules:1, h:82*MM, kind:'timer' },
   km1:    { title:'Магнитный пускатель KM1', modules:3, h:82*MM, kind:'contactor', overR:PAD_W },
   kk1:    { title:'Тепловое реле KK1',    modules:3, h:74*MM, kind:'relay', over:PIN_TOP }
 };
-const STOCK = { klemma:1, pebus:1, mcb3:1, mcb1:1, rcd:1, meter:1, sensor:1, lamp:3, bulb:1, outlet:1, wallSwitch:1, twoWaySwitch:1, fridge:1, washer:1, boiler:1, stove:1, vfd:1, tp:1, timer:1, km1:2, kk1:2 };
+const STOCK = { klemma:1, pebus:1, mcb3:1, mcb1:1, rcd:1, meter:1, sensor:1, lamp:3, bulb:1, outlet:1, wallSwitch:1, twoWaySwitch:1, fridge:1, washer:1, boiler:1, stove:1, split:1, vfd:1, tp:1, timer:1, km1:2, kk1:2 };
 STOCK.junction=1;TAGS.junction='XR1';TAG_PREFIX.junction='XR';
 const KIND_RU = { mcb:'автоматический выключатель', terminal:'клеммная шина: все зажимы соединены внутри',
                   junction:'открытая коробка: 4 независимые колодки по 3 клеммы',
@@ -794,7 +795,7 @@ function twoWaySwitchInner(o){
    L/N питают прибор, PE подключается к корпусу, мощность задаётся в свойствах. */
 function applianceInner(type,o){
   const t=TYPES[type],w=t.modules*MODULE,h=t.h;
-  const names={fridge:'ХОЛОДИЛЬНИК',washer:'СТИРАЛЬНАЯ МАШИНА',boiler:'БОЙЛЕР',stove:'ЭЛЕКТРОПЛИТА'};
+  const names={fridge:'ХОЛОДИЛЬНИК',washer:'СТИРАЛЬНАЯ МАШИНА',boiler:'БОЙЛЕР',stove:'ЭЛЕКТРОПЛИТА',split:'СПЛИТ-СИСТЕМА'};
   const power=Math.max(1,Number(o.ratedPower)||t.defaultPower||1000);
   const powerText=power>=1000?(power/1000).toFixed(power%1000?1:0)+' кВт':Math.round(power)+' Вт';
   const voltage=applianceVoltage(o),powered=voltageIsOperating(voltage,o,220);
@@ -816,6 +817,8 @@ function applianceInner(type,o){
     s+='<rect x="21" y="77" width="44" height="51" rx="5" fill="#dce5e8" stroke="#7f8b92" stroke-width="1.5"/><circle cx="43" cy="106" r="15" fill="#6f8792" stroke="#4f6068" stroke-width="2"/><circle cx="43" cy="106" r="10" fill="#aac1ca"/><circle cx="29" cy="85" r="2.5" fill="#45a36b"/><rect x="36" y="82" width="21" height="5" rx="2" fill="#aab4b9"/>';
   }else if(type==='boiler'){
     s+='<rect x="27" y="75" width="32" height="55" rx="15" fill="#dce5e8" stroke="#7f8b92" stroke-width="1.5"/><path d="M35 130 v5 M51 130 v5" stroke="#d64545" stroke-width="3"/><circle cx="43" cy="118" r="3" fill="#d93630"/>';
+  }else if(type==='split'){
+    s+='<rect x="19" y="81" width="48" height="25" rx="6" fill="#dce5e8" stroke="#7f8b92" stroke-width="1.5"/><path d="M23 99 H63 M25 102 H61" fill="none" stroke="#7f8b92" stroke-width="1.2"/><circle cx="59" cy="88" r="2" fill="#45a36b"/><path d="M29 111 Q25 116 29 121 M43 111 Q39 116 43 121 M57 111 Q53 116 57 121" fill="none" stroke="#8aa9b8" stroke-width="1.5" stroke-linecap="round"/>';
   }else{
     s+='<rect x="20" y="77" width="46" height="51" rx="4" fill="#cad1d5" stroke="#737d84" stroke-width="1.5"/><circle cx="32" cy="91" r="7" fill="#596168"/><circle cx="53" cy="91" r="7" fill="#596168"/><circle cx="32" cy="112" r="7" fill="#596168"/><circle cx="53" cy="112" r="7" fill="#596168"/>';
   }
@@ -1372,7 +1375,7 @@ const deviceLayer = document.getElementById('deviceLayer');
 const mmLayer     = document.getElementById('mmLayer');
 
 // Равные отступы от верхней и нижней грани до осей крайних реек.
-const PANEL={width:SLOTS*MODULE+80,firstRail:360,pitch:400,baseHeight:720,inboxX:26,inboxY:36};
+const PANEL={width:SLOTS*MODULE+64,firstRail:360,pitch:400,baseHeight:720,inboxX:26,inboxY:36};
 function panelRailCount(panel){return Math.max(1,Math.min(5,Math.round(Number(panel.railCount)||2)));}
 function panelHeight(panel){return PANEL.baseHeight+(panelRailCount(panel)-1)*PANEL.pitch;}
 function panelById(id){return state.panels.find(function(p){return p.id===id;})||null;}
@@ -1412,7 +1415,7 @@ function syncPanelInbox(){
 }
 function mountingRails(){
   const rails=state.standaloneRails!==false?RAILS.map(function(y,i){return {id:i,x:RAIL_X0,y:y,slots:SLOTS};}):[];
-  state.panels.forEach(function(p){for(let row=0;row<panelRailCount(p);row++)rails.push({id:p.id+':'+row,x:p.x+40,y:p.y+PANEL.firstRail+row*PANEL.pitch,slots:SLOTS,panelId:p.id,row:row});});
+  state.panels.forEach(function(p){for(let row=0;row<panelRailCount(p);row++)rails.push({id:p.id+':'+row,x:p.x+32,y:p.y+PANEL.firstRail+row*PANEL.pitch,slots:SLOTS,panelId:p.id,row:row});});
   return rails;
 }
 function mountingRail(id){return mountingRails().find(function(r){return r.id===id;})||null;}
@@ -1454,7 +1457,7 @@ function detachPanelDevices(panel,fromRow){
   state.devices.forEach(function(d){
     if(typeof d.rail!=='string'||!d.rail.startsWith(panel.id+':'))return;
     const row=Number(d.rail.split(':')[1]);if(row<fromRow)return;
-    d.x=panel.x+40+d.slot*MODULE;d.y=panel.y+PANEL.firstRail+row*PANEL.pitch-TYPES[d.type].h/2;
+    d.x=panel.x+32+d.slot*MODULE;d.y=panel.y+PANEL.firstRail+row*PANEL.pitch-TYPES[d.type].h/2;
     delete d.rail;delete d.slot;
   });
 }
@@ -2186,6 +2189,7 @@ function onPointerUp(evt){
       }
       if (d.type === 'mcb1'||d.type === 'mcb3'){
         dev.breakerType=d.type==='mcb3'?'C25':'C10';
+        dev.breakerHeat=0;dev.breakerCurrentA=0;dev.breakerPhaseCurrents=[];
       }
       if (TYPES[d.type].kind === 'appliance'){
         dev.applianceOn=false;dev.applianceBurned=false;
@@ -2957,7 +2961,7 @@ function characteristicsFor(target){
     const defaults={
       mcb3:[380,25],mcb1:[220,10],rcd:[220,25],meter:[220,60],sensor:[220,80],
       lamp:[220,1],bulb:[220,0.45],outlet:[220,16],wallSwitch:[220,10],twoWaySwitch:[220,10],
-      fridge:[220,1.4],washer:[220,10],boiler:[220,9.1],stove:[220,31.8],
+      fridge:[220,1.4],washer:[220,10],boiler:[220,9.1],stove:[220,31.8],split:[220,1500/220],
       vfd:[380,10],tp:[380,40],km1:[220,25],timer:[220,5]
     }[obj.type];
     if(defaults){
@@ -3070,6 +3074,7 @@ function saveProperties(){
     const selectedCurrent=Math.max(2,Number(String(obj.breakerType).replace(/^C/,''))||10);
     obj.ratedCurrent=selectedCurrent;
     obj.customName=(obj.type==='mcb3'?'Автомат 3P, ':'Автомат 1P, ')+obj.breakerType;
+    obj.breakerHeat=0;obj.breakerCurrentA=0;obj.breakerPhaseCurrents=[];
   }
   if(propertiesTarget.target.kind==='special'&&propertiesTarget.target.key==='panel'){
     obj.railCount=panelRailCount(obj);detachPanelDevices(obj,obj.railCount);
@@ -3298,6 +3303,7 @@ function toggleDevice(dev){
   }
   if (dev.tripped){
     dev.tripped = false; dev.on = false; dev.rcdLeakageMa = 0;
+    if(t.kind==='mcb'){dev.breakerHeat=0;dev.breakerCurrentA=0;dev.breakerPhaseCurrents=[];}
     playBreakerSound(false);                 // взведение рукоятки после срабатывания
     log(t.title + ': взведён после срабатывания, рукоятка в «0».', 'ok');
   } else if (!dev.on){
@@ -3912,6 +3918,7 @@ function electricalShortFault(map){
   if(breaker){
     breaker.tripped = true;
     breaker.on = false;
+    if(TYPES[breaker.type]&&TYPES[breaker.type].kind==='mcb')breaker.breakerHeat=1;
     playBreakerSound(false, true);           // автоматическое отключение от короткого замыкания
     activeShortFaultSignature=signature;
     applyDeviceVisual(breaker);
@@ -5154,10 +5161,89 @@ function motorSupplyRelay(motor){
   return null;
 }
 
+/* ---------- токовая защита автоматических выключателей ----------
+   Токи берутся из той же узловой модели, что питает показания токовых клещей.
+   Для 3P автомата контролируются все три полюса, а срабатывание определяется
+   наиболее нагруженной фазой. Характеристика C имеет две области:
+   накопление тепла выше In и быстрое электромагнитное отключение от 5·In. */
+function breakerNominalCurrent(dev){
+  const fromType=Number(String(dev&&dev.breakerType||'').replace(/^[A-ZА-Я]+/i,''));
+  return Math.max(.1,Number(dev&&dev.ratedCurrent)||(isFinite(fromType)&&fromType>0?fromType:(dev&&dev.type==='mcb3'?25:10)));
+}
+function breakerPoleCurrents(dev,wireCurrents){
+  const count=dev&&dev.type==='mcb3'?3:1,result=[];
+  for(let pole=0;pole<count;pole++){
+    const top='t'+pole,bottom='b'+pole;
+    let topCurrent=0,bottomCurrent=0;
+    state.wires.forEach(function(w){
+      const current=Math.max(0,Number(wireCurrents[w.id])||0);
+      if(String(w.a.devId)===String(dev.id)){
+        if(w.a.key===top)topCurrent+=current;
+        if(w.a.key===bottom)bottomCurrent+=current;
+      }
+      if(String(w.b.devId)===String(dev.id)){
+        if(w.b.key===top)topCurrent+=current;
+        if(w.b.key===bottom)bottomCurrent+=current;
+      }
+    });
+    // При нескольких отходящих линиях их токи складываются на выходе полюса.
+    // max поддерживает и обычное, и обратное питание автомата.
+    result.push(Math.max(topCurrent,bottomCurrent));
+  }
+  return result;
+}
+function breakerProtectionStep(dt,wireCurrents){
+  dt=Math.min(.5,Math.max(0,Number(dt)||0));
+  const breakers=state.devices.filter(function(d){return d.type==='mcb1'||d.type==='mcb3';});
+  const active=breakers.some(function(d){return d.on&&!d.tripped;});
+  const currents=wireCurrents||(active?clampWireCurrents():{}),candidates=[];
+  let changed=false;
+  breakers.forEach(function(dev){
+    const before=Math.max(0,Number(dev.breakerHeat)||0);
+    if(!dev.on||dev.tripped){
+      dev.breakerCurrentA=0;dev.breakerPhaseCurrents=[];
+      if(!dev.tripped)dev.breakerHeat=Math.max(0,before-dt/12);
+      if(Math.abs((dev.breakerHeat||0)-before)>.0001)changed=true;
+      return;
+    }
+    const phaseCurrents=breakerPoleCurrents(dev,currents);
+    const current=Math.max.apply(null,phaseCurrents.concat([0]));
+    const nominal=breakerNominalCurrent(dev),ratio=current/nominal;
+    dev.breakerPhaseCurrents=phaseCurrents;
+    dev.breakerCurrentA=current;
+    if(ratio>1){
+      // Небольшая перегрузка отключается с выдержкой времени; чем выше ток,
+      // тем быстрее нагревается расцепитель. При 5·In зона C отключает сразу.
+      dev.breakerHeat=ratio>=5?1:Math.min(1,before+dt*(ratio*ratio-1)/8);
+    }else dev.breakerHeat=Math.max(0,before-dt/12);
+    if(Math.abs(dev.breakerHeat-before)>.0001)changed=true;
+    if(dev.breakerHeat>=1)candidates.push({dev:dev,current:current,nominal:nominal,ratio:ratio,phases:phaseCurrents});
+  });
+  // В последовательной цепи первым отключается автомат с наибольшей кратностью
+  // перегрузки. После его отключения ток исчезнет, остальные начнут остывать.
+  candidates.sort(function(a,b){return b.ratio-a.ratio||a.nominal-b.nominal;});
+  const trip=candidates[0]||null;
+  if(trip){
+    trip.dev.tripped=true;trip.dev.on=false;trip.dev.breakerHeat=1;
+    playBreakerSound(false,true);
+  }
+  return {changed:changed,tripped:trip,currents:currents};
+}
+
 let thermalLastTick = Date.now();
 function thermalTick(){
   const now = Date.now(), dt = Math.min(0.5, Math.max(0, (now-thermalLastTick)/1000));
   thermalLastTick = now;
+  const breakerResult=breakerProtectionStep(dt);
+  if(breakerResult.tripped){
+    const trip=breakerResult.tripped,dev=trip.dev;
+    const phases=trip.phases.map(function(v,i){return (dev.type==='mcb3'?('L'+(i+1)+' '):'')+v.toFixed(1)+' А';}).join(', ');
+    log('АВАРИЯ: '+tagOf(dev.id)+' отключён по перегрузке. Ток '+trip.current.toFixed(1)+' А превысил номинал '+trip.nominal.toFixed(trip.nominal%1?1:0)+' А'+(dev.type==='mcb3'?' ('+phases+')':'')+'.','err');
+    warn('Сработал автомат '+tagOf(dev.id)+': перегрузка '+trip.current.toFixed(1)+' А при номинале '+trip.nominal.toFixed(trip.nominal%1?1:0)+' А.');
+    showPhaseFault('ПЕРЕГРУЗКА! '+tagOf(dev.id)+' · '+trip.current.toFixed(1)+' А > '+trip.nominal.toFixed(trip.nominal%1?1:0)+' А · АВТОМАТ ОТКЛЮЧЁН');
+    renderAll();
+    return;
+  }
   const activeLoads={};
   state.motors.forEach(function(motor){
     const direction=motorPhaseDirection(motor);
@@ -5567,7 +5653,7 @@ function specialTrayPreview(key){
     const panel={x:0,y:0,railCount:2,tag:'ЩР'};
     let s=panelInner(panel);
     if(!state.special.inbox)s+='<g transform="translate('+PANEL.inboxX+','+PANEL.inboxY+')">'+inboxInner(false)+'</g>';
-    for(let row=0;row<2;row++)s+=railSvg({x:40,y:PANEL.firstRail+row*PANEL.pitch,slots:SLOTS});
+    for(let row=0;row<2;row++)s+=railSvg({x:32,y:PANEL.firstRail+row*PANEL.pitch,slots:SLOTS});
     return '<svg class="mini" viewBox="0 0 '+PANEL.width+' '+panelHeight(panel)+'" preserveAspectRatio="xMidYMid meet">'+s+'</svg>';
   }
   if(key==='clamp')return '<svg class="mini" viewBox="-36 -36 172 72" preserveAspectRatio="xMidYMid meet">'+clampObjectSvg({id:'preview',x:0,y:0,wireId:null,drag:false},{})+'</svg>';
@@ -6064,6 +6150,7 @@ function loadSelectedPreset(){
       if(allowed.indexOf(d.breakerType)<0)d.breakerType=d.type==='mcb3'?'C25':'C10';
       d.ratedCurrent=Math.max(2,Number(String(d.breakerType).replace(/^C/,''))||10);
       d.customName=(d.type==='mcb3'?'Автомат 3P, ':'Автомат 1P, ')+d.breakerType;
+      d.breakerHeat=0;d.breakerCurrentA=0;d.breakerPhaseCurrents=[];
     }
     if(TYPES[d.type]&&TYPES[d.type].kind==='appliance'){
       d.applianceOn=!!d.applianceOn;d.applianceBurned=!!d.applianceBurned;

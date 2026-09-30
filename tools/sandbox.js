@@ -21,6 +21,7 @@ globalThis.__t = {
   filter:function(){return logFilter;},
   /* электрическая модель и аппараты */
   state:state, TYPES:TYPES, STOCK:STOCK, DCM:DCM,
+  MODULE:MODULE, SLOTS:SLOTS, PANEL:PANEL, mountingRails:mountingRails,
   /* сенсорное управление */
   touchPointers:touchPointers, nearestTouchTerminal:nearestTouchTerminal,
   touchView:function(){return view;}, touchPending:function(){return pending;},
@@ -33,6 +34,8 @@ globalThis.__t = {
   acSnapshot:acSourceSnapshot, acSample:acPhasorSample, phasorDifference:phasorDifference,
   motorSupplyFrequency:motorSupplyFrequency, motorOperatingPoint:motorOperatingPoint,
   motorVisualOperating:motorVisualOperating, motorSupplyRelay:motorSupplyRelay,
+  clampWireCurrents:clampWireCurrents, breakerNominalCurrent:breakerNominalCurrent,
+  breakerPoleCurrents:breakerPoleCurrents, breakerProtectionStep:breakerProtectionStep,
   /* преобразователь и машина постоянного тока */
   newDcMotor:newDcMotor, dcMotorData:dcMotorData, dcMotorOperatingPoint:dcMotorOperatingPoint,
   dcMotorInertiaStep:dcMotorInertiaStep, dcTerminalVoltage:dcTerminalVoltage,
