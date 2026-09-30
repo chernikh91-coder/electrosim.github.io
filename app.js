@@ -1796,6 +1796,237 @@ function isLive(dev){
    ============================================================ */
 let drag = null;
 
+/* Касания перехватываются до обработчиков мыши. Короткое касание выполняет
+   обычное действие, движение — перенос, удержание корпуса — контекстное меню.
+   Второй палец переводит жест в масштабирование, сохраняя черновик провода. */
+const touchPointers=new Map();
+let touchGesture=null,touchPanMode=false,touchPlacement=null,touchMoveFrame=0,touchMoveEvent=null;
+function mobileTouchLayout(){
+  return typeof window.matchMedia==='function'
+    && window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+}
+function touchUI(){
+  if(!mobileTouchLayout())return;
+  const root=document.documentElement||document.body;
+  root.classList.add('touch-ui');
+  document.body.classList.add('touch-input');
+}
+function touchStatus(text){
+  const status=document.getElementById('touchStatus');
+  if(status)status.textContent=text||'';
+  const cancel=document.getElementById('touchCancel');
+  if(cancel)cancel.disabled=!pending&&!touchPlacement;
+}
+function touchObjectTarget(el){
+  let g=el.closest('[data-clamp-id]');if(g)return {kind:'special',key:'clamp',id:g.dataset.clampId};
+  g=el.closest('.mm-probe,.multimeter-body');if(g)return {kind:'special',key:'multimeter'};
+  g=el.closest('.motor-draggable');if(g)return {kind:'special',key:motorIsDc(motorById(g.dataset.dev))?'dcmotor':'motor',id:g.dataset.dev};
+  g=el.closest('.push-station');if(g)return {kind:'special',key:'pushbutton',id:g.dataset.dev};
+  g=el.closest('.relay');if(g)return {kind:'relay',id:+g.dataset.rid};
+  g=el.closest('.dev');if(g)return {kind:'device',id:+g.dataset.id};
+  g=el.closest('.inbox-draggable');if(g){const panel=inboxPanel();return panel?{kind:'special',key:'panel',id:panel.id}:{kind:'special',key:'inbox'};}
+  g=el.closest('[data-panel-id]');if(g)return {kind:'special',key:'panel',id:g.dataset.panelId};
+  return null;
+}
+function nearestTouchTerminal(evt){
+  const matrix=ctmNode().getScreenCTM();if(!matrix)return null;
+  let best=null,distance=22;
+  termLayer.querySelectorAll('.term').forEach(function(el){
+    const p=new DOMPoint(+el.getAttribute('cx'),+el.getAttribute('cy')).matrixTransform(matrix);
+    const d=Math.hypot(p.x-evt.clientX,p.y-evt.clientY);
+    if(d<distance){distance=d;best=el;}
+  });
+  return best;
+}
+function replayTouch(type,session,point,target){
+  const event=new PointerEvent(type,{bubbles:true,cancelable:true,pointerId:session.id,pointerType:'touch',
+    isPrimary:true,button:0,buttons:type==='pointerup'||type==='pointercancel'?0:1,
+    clientX:point.clientX,clientY:point.clientY});
+  Object.defineProperty(event,'touchReplay',{value:true});
+  (target||document).dispatchEvent(event);
+}
+function touchLayoutSnapshot(session){
+  // Только геометрия: отмена жеста не откатывает электрические процессы.
+  const target=touchObjectTarget(session.target),wire=session.target.closest('[data-wid]');
+  let obj=null;
+  if(target){
+    if(target.kind==='device')obj=devById(target.id);
+    else if(target.kind==='relay'){const r=anyRelayById(target.id);obj=r&&devById(r.kmId);}
+    else if(target.key==='panel')obj=panelById(target.id);
+    else if(target.key==='motor'||target.key==='dcmotor')obj=motorById(target.id);
+    else if(target.key==='pushbutton')obj=pushbuttonById(target.id);
+    else if(target.key==='clamp')obj=state.clamps.find(function(c){return c.id===target.id;});
+    else if(target.key==='inbox')obj=INBOX;
+    else if(target.key==='multimeter')obj=METER;
+  }
+  const fields=['x','y','rail','slot','wireId','fraction','redX','redY','blackX','blackY'];
+  if(obj){const saved={};fields.forEach(function(k){saved[k]=obj[k];});session.restore=function(){fields.forEach(function(k){if(saved[k]===undefined)delete obj[k];else obj[k]=saved[k];});};}
+  if(target&&target.key==='multimeter'){
+    const restore=session.restore,a=state.mm.a,b=state.mm.b;
+    session.restore=function(){if(restore)restore();state.mm.a=a;state.mm.b=b;};
+  }
+  if(wire){const w=state.wires.find(function(w){return w.id===+wire.dataset.wid;});if(w){const pts=JSON.parse(JSON.stringify(w.pts||[]));session.restore=function(){w.pts=pts;};}}
+}
+function startTouchAction(session,point){
+  clearTimeout(session.timer);session.timer=null;
+  const actual=document.elementFromPoint(session.sx,session.sy);
+  if(session.target.closest('.term'))session.target=nearestTouchTerminal({clientX:session.sx,clientY:session.sy})||session.target;
+  else if(actual&&actual.closest&&(actual.closest('#scene')||actual.closest('.tray-item')))session.target=actual;
+  touchLayoutSnapshot(session);
+  session.mode='action';
+  replayTouch('pointerdown',session,{clientX:session.sx,clientY:session.sy},session.target);
+  if(session.tray)sideMenuItems.forEach(function(item){item.open=false;});
+}
+function flushTouchMove(){
+  if(touchMoveFrame){cancelAnimationFrame(touchMoveFrame);touchMoveFrame=0;}
+  const move=touchMoveEvent;touchMoveEvent=null;
+  if(move)replayTouch('pointermove',move.session,move.point);
+}
+function cancelTouchAction(session){
+  clearTimeout(session.timer);
+  if(touchMoveFrame){cancelAnimationFrame(touchMoveFrame);touchMoveFrame=0;}touchMoveEvent=null;
+  if(session.mode!=='action')return;
+  // Сбрасываем перенос до pointercancel, чтобы отпускание не включило аппарат
+  // и не установило щуп/деталь при переходе к жесту двумя пальцами.
+  if(drag){drag.ghost.remove();drag=null;}
+  if(specialTrayDrag){specialTrayDrag.ghost.remove();specialTrayDrag=null;}
+  freeDeviceDrag=null;motorDrag=null;inboxDrag=null;pushStationDrag=null;
+  meterDrag=null;meterProbeDrag=null;meterProbeHover=null;wireGrab=null;
+  if(panelDragFrame)cancelAnimationFrame(panelDragFrame);
+  panelDragFrame=0;panelDrag=null;panelDragPointer=null;
+  if(clampDragFrame)cancelAnimationFrame(clampDragFrame);
+  clampDragFrame=0;clampDragPointer=null;if(clampState)clampState.drag=false;
+  replayTouch('pointercancel',session,session);
+  if(session.restore)session.restore();
+  renderAll();
+}
+function touchPair(){
+  const points=Array.from(touchPointers.values());
+  return {x:(points[0].clientX+points[1].clientX)/2,y:(points[0].clientY+points[1].clientY)/2,
+    distance:Math.max(1,Math.hypot(points[0].clientX-points[1].clientX,points[0].clientY-points[1].clientY))};
+}
+function moveTouchView(){
+  if(!touchGesture)return;
+  const g=touchGesture;
+  const pair=g.pinch?touchPair():Array.from(touchPointers.values())[0];
+  const cx=g.pinch?pair.x:pair.clientX,cy=g.pinch?pair.y:pair.clientY;
+  const width=Math.max(Z_MIN,Math.min(Z_MAX,g.width*(g.pinch?g.distance/pair.distance:1)));
+  const rect=scene.getBoundingClientRect(),scale=rect.width/width;
+  view.w=width;view.h=width*viewAspect();
+  view.x=g.anchor.x-(cx-rect.left)/scale;view.y=g.anchor.y-(cy-rect.top)/scale;
+  clampView();applyView();
+}
+function startTouchView(pinch,session){
+  const pair=pinch?touchPair():{x:session.sx,y:session.sy};
+  touchGesture={pinch:pinch,width:view.w,distance:pair.distance,anchor:screenToScene(pair.x,pair.y)};
+  touchPointers.forEach(function(s){cancelTouchAction(s);s.mode='gesture';clearTimeout(s.timer);});
+  hideWireMenu();hideObjectMenu();
+}
+function stopTouchEvent(evt){evt.preventDefault();evt.stopImmediatePropagation();}
+function onTouchStart(evt){
+  if(evt.pointerType!=='touch'||evt.touchReplay)return;
+  const target=evt.target;
+  if(!target.closest)return;
+  const tray=target.closest('.tray-item');
+  // Текст карточки прокручивает лоток; за превью деталь можно перетащить.
+  if(tray&&!target.closest('.mini'))return;
+  if(!tray&&!target.closest('#scene'))return;
+  if(target.closest('input,select,textarea,button,.motor-load-control'))return;
+  touchUI();stopTouchEvent(evt);
+  const s={id:evt.pointerId,target:target,tray:!!tray,sx:evt.clientX,sy:evt.clientY,
+    clientX:evt.clientX,clientY:evt.clientY,mode:'waiting',timer:null};
+  if(!tray&&!target.closest('.mm-probe,[data-pb],[data-zone],[data-vfd-control],[data-tp-control],[data-timer-control],.mm-mode,[data-switch-key],[data-two-way-switch],[data-appliance-toggle]')){
+    const term=nearestTouchTerminal(evt);if(term)s.target=term;
+  }
+  touchPointers.set(s.id,s);
+  if(typeof scene.setPointerCapture==='function')try{scene.setPointerCapture(s.id);}catch(e){}
+  if(touchPointers.size===2){startTouchView(true,s);return;}
+  if(touchPointers.size>2){s.mode='gesture';return;}
+  if(!tray&&touchPanMode&&!touchPlacement){startTouchView(false,s);return;}
+  if(touchPlacement)return;
+  const hold=s.target.closest('[data-pb],[data-zone="manual-contactor"],[data-vfd-control],[data-tp-control]');
+  if(hold){startTouchAction(s,evt);return;}
+  if(!tray&&!pending&&!s.target.closest('.term')&&(touchObjectTarget(s.target)||s.target.closest('[data-wid]'))){
+    s.timer=setTimeout(function(){
+      if(s.mode!=='waiting'||touchPointers.size!==1)return;
+      s.mode='menu';
+      const wire=s.target.closest('[data-wid]');
+      if(wire){hideObjectMenu();showWireMenu(+wire.dataset.wid,s.clientX,s.clientY,svgPoint(s));}
+      else showObjectMenu({clientX:s.clientX,clientY:s.clientY,preventDefault:function(){},stopPropagation:function(){}},touchObjectTarget(s.target));
+    },600);
+  }
+}
+function onTouchMove(evt){
+  if(evt.pointerType!=='touch'||evt.touchReplay)return;
+  const s=touchPointers.get(evt.pointerId);if(!s)return;
+  stopTouchEvent(evt);s.clientX=evt.clientX;s.clientY=evt.clientY;
+  if(touchGesture){if(touchPointers.size>=2||!touchGesture.pinch)moveTouchView();return;}
+  if(s.mode==='gesture'||s.mode==='menu'||touchPlacement)return;
+  if(s.mode==='waiting'&&Math.hypot(s.clientX-s.sx,s.clientY-s.sy)>8){
+    clearTimeout(s.timer);
+    if(!s.tray&&!pending&&!s.target.closest('.term')&&!touchObjectTarget(s.target)&&!s.target.closest('[data-wid]')){startTouchView(false,s);moveTouchView();return;}
+    if(pending&&!s.target.closest('.term'))s.mode='route';
+    else startTouchAction(s,evt);
+  }
+  if(s.mode==='action'||s.mode==='route'){
+    touchMoveEvent={session:s,point:{clientX:s.clientX,clientY:s.clientY}};
+    if(!touchMoveFrame)touchMoveFrame=requestAnimationFrame(function(){touchMoveFrame=0;flushTouchMove();});
+  }
+}
+function placeTouchItem(point){
+  const spec=touchPlacement;touchPlacement=null;if(!spec)return;
+  const evt={clientX:point.clientX,clientY:point.clientY,pointerId:point.id,preventDefault:function(){}};
+  if(spec.special){startSpecialTrayDrag(evt,spec.special);specialTrayDrag.moved=true;finishSpecialTrayDrag(evt);}
+  else{startDrag(evt,{type:spec.type});drag.moved=true;drag.candidate=computeCandidate(evt);onPointerUp(evt);}
+  touchStatus('');
+}
+function onTouchEnd(evt){
+  if(evt.pointerType!=='touch'||evt.touchReplay)return;
+  const s=touchPointers.get(evt.pointerId);if(!s)return;
+  stopTouchEvent(evt);clearTimeout(s.timer);
+  s.clientX=evt.clientX;s.clientY=evt.clientY;
+  if(evt.type==='pointercancel')cancelTouchAction(s);
+  else if(!touchGesture&&s.mode!=='menu'&&s.mode!=='gesture'){
+    flushTouchMove();
+    if(touchPlacement&&!s.tray)placeTouchItem(s);
+    else if(s.mode==='waiting'){
+      if(s.tray){const item=s.target.closest('.tray-item');chooseTouchPlacement(item);}
+      else{startTouchAction(s,s);replayTouch('pointerup',s,s);}
+    }else{
+      if(s.mode==='route'&&!nearestTouchTerminal(s))replayTouch('pointerdown',s,s,scene);
+      replayTouch('pointerup',s,s);
+    }
+  }
+  touchPointers.delete(s.id);
+  if(typeof scene.releasePointerCapture==='function')try{scene.releasePointerCapture(s.id);}catch(e){}
+  // Оставшийся палец после pinch не становится кликом или переносом.
+  if(touchPointers.size<2&&touchGesture&&touchGesture.pinch)touchGesture=null;
+  if(!touchPointers.size)touchGesture=null;
+  touchStatus(touchPlacement?'Коснитесь места установки.':(pending?'Коснитесь клеммы или добавьте точку маршрута.':''));
+}
+function chooseTouchPlacement(item){
+  touchPlacement=item.dataset.special?{special:item.dataset.special}:{type:item.dataset.type};
+  cancelWire();sideMenuItems.forEach(function(menu){menu.open=false;});
+  touchStatus('Коснитесь места установки.');
+}
+function initTouchControls(){
+  // Мобильная компоновка включается только когда основное устройство ввода —
+  // палец. Наличие дополнительного сенсорного экрана у ПК не меняет desktop UI.
+  if(mobileTouchLayout())touchUI();
+  document.addEventListener('pointerdown',onTouchStart,{capture:true,passive:false});
+  document.addEventListener('pointermove',onTouchMove,{capture:true,passive:false});
+  document.addEventListener('pointerup',onTouchEnd,{capture:true,passive:false});
+  document.addEventListener('pointercancel',onTouchEnd,{capture:true,passive:false});
+  scene.addEventListener('contextmenu',function(e){if(e.pointerType==='touch'||touchPointers.size){e.preventDefault();e.stopImmediatePropagation();}},true);
+  const panButton=document.getElementById('touchPanToggle');
+  if(panButton)panButton.addEventListener('click',function(){touchPanMode=!touchPanMode;panButton.setAttribute('aria-pressed',String(touchPanMode));panButton.classList.toggle('on',touchPanMode);});
+  const cancel=document.getElementById('touchCancel');
+  if(cancel)cancel.addEventListener('click',function(){touchPlacement=null;cancelWire();hideWireMenu();hideObjectMenu();touchStatus('');});
+  document.getElementById('tray').addEventListener('click',function(e){const button=e.target.closest('.tray-add');if(button)chooseTouchPlacement(button.closest('.tray-item'));});
+  if(typeof window.addEventListener==='function')window.addEventListener('blur',function(){touchPointers.forEach(cancelTouchAction);touchPointers.clear();touchGesture=null;});
+}
+initTouchControls();
+
 /* координаты считаем в системе группы world (в ней лежат все слои) —
    иначе после сдвига сцены курсор «промахивается» мимо аппаратов и клемм */
 const worldGroup = document.getElementById('world');
@@ -2081,6 +2312,7 @@ document.addEventListener('pointercancel',finishSpecialTrayDrag);
 document.getElementById('tray').addEventListener('pointerdown', function(evt){
   const item = evt.target.closest('.tray-item');
   if (!item) return;
+  if(evt.target.closest('.tray-add')||(evt.pointerType==='touch'&&!evt.touchReplay))return;
   if (evt.button !== 0) return;
   if(item.dataset.special){
     startSpecialTrayDrag(evt,item.dataset.special);
@@ -2614,8 +2846,8 @@ function showObjectMenu(evt,target){
   evt.preventDefault();evt.stopPropagation();hideWireMenu();
   objectMenuTarget=target;
   objectMenuEl.style.display='block';
-  objectMenuEl.style.left=Math.min(evt.clientX,window.innerWidth-objectMenuEl.offsetWidth-8)+'px';
-  objectMenuEl.style.top=Math.min(evt.clientY,window.innerHeight-objectMenuEl.offsetHeight-8)+'px';
+  objectMenuEl.style.left=Math.max(8,Math.min(evt.clientX,window.innerWidth-objectMenuEl.offsetWidth-8))+'px';
+  objectMenuEl.style.top=Math.max(8,Math.min(evt.clientY,window.innerHeight-objectMenuEl.offsetHeight-8))+'px';
 }
 
 /* Редактор характеристик. Пока здесь собраны основные паспортные поля;
@@ -4334,7 +4566,7 @@ document.addEventListener('pointerup', function(evt){
   }
   if (!pending || evt.button !== 0) return;
   const el2 = document.elementFromPoint ? document.elementFromPoint(evt.clientX, evt.clientY) : null;
-  const hit = (el2 && el2.closest) ? el2.closest('.term') : null;
+  const hit = (el2 && el2.closest && el2.closest('.term')) || (evt.pointerType==='touch'&&nearestTouchTerminal(evt));
   if (!hit) return;                                   // провод остаётся за курсором: ждём второй клик
   const devId = hit.dataset.dev, key = hit.dataset.key;
   const id = toDevId(devId);
@@ -4404,6 +4636,7 @@ function showWireMenu(wid, clientX, clientY, sp){
 function hideWireMenu(){
   const m = document.getElementById('wireMenu');
   if (m) m.style.display = 'none';
+  if(m)m.querySelectorAll('.menu-sub.open').forEach(function(sub){sub.classList.remove('open');const b=sub.querySelector('.submenu-trigger');if(b)b.setAttribute('aria-expanded','false');});
   clearWireShapePreview();
   wireMenu = { wid:null, x:0, y:0 };
 }
@@ -4501,6 +4734,8 @@ wireLayer.addEventListener('contextmenu', function(evt){
   const shapeMenu = m.querySelector('.wire-shapes');
   if (shapeMenu) shapeMenu.addEventListener('mouseleave', clearWireShapePreview);
   m.addEventListener('click', function(evt){
+    const trigger=evt.target.closest?evt.target.closest('.submenu-trigger'):null;
+    if(trigger){const sub=trigger.closest('.menu-sub'),open=!sub.classList.contains('open');m.querySelectorAll('.menu-sub').forEach(function(other){other.classList.remove('open');const b=other.querySelector('.submenu-trigger');if(b)b.setAttribute('aria-expanded','false');});sub.classList.toggle('open',open);trigger.setAttribute('aria-expanded',String(open));return;}
     const shapeButton = evt.target.closest ? evt.target.closest('[data-wire-shape]') : null;
     if (shapeButton){ changeWireShape(shapeButton.getAttribute('data-wire-shape')); return; }
     const colorButton = evt.target.closest ? evt.target.closest('[data-wire-color]') : null;
@@ -5248,6 +5483,11 @@ let view = { x:0, y:0, w:VW, h:VH };
 let pan = null;
 const Z_MIN = VW/8, Z_MAX = VW*1.4;
 
+/* Геометрия viewBox одинакова на ПК и мобильных устройствах. Адаптация экрана
+   выполняется интерфейсом, а не изменением координат сцены: так колесо мыши,
+   кнопки масштаба и предельное отдаление остаются прежними. */
+function viewAspect(){return VH/VW;}
+
 function applyView(){
   scene.setAttribute('viewBox', view.x+' '+view.y+' '+view.w+' '+view.h);
   const z = document.getElementById('zval');
@@ -5255,7 +5495,7 @@ function applyView(){
 }
 function clampView(){
   view.w = Math.max(Z_MIN, Math.min(Z_MAX, view.w));
-  view.h = view.w * VH / VW;
+  view.h = view.w * viewAspect();
   const mx = view.w*0.35, my = view.h*0.35;
   view.x = Math.max(-mx, Math.min(VW - view.w + mx, view.x));
   // При отдалении не открываем сотни пикселей пустого поля над вводом XT1.
@@ -5273,11 +5513,12 @@ function zoomAt(factor, cx, cy){
   view.x = p.x - (p.x - view.x) * rf;
   view.y = p.y - (p.y - view.y) * rf;
   view.w = nw;
-  view.h = nw * VH / VW;
+  view.h = nw * viewAspect();
   clampView();
   applyView();
 }
-function resetView(){ view = { x:0, y:0, w:VW, h:VH }; applyView(); }
+function resetView(){view={x:0,y:0,w:VW,h:VH};applyView();}
+if(typeof window.addEventListener==='function')window.addEventListener('resize',function(){clampView();applyView();hideWireMenu();hideObjectMenu();});
 
 scene.addEventListener('wheel', function(evt){
   evt.preventDefault();
@@ -5371,7 +5612,7 @@ function renderTray(){
           +   '<svg class="mini" viewBox="0 '+(-over)+' '+(w+overR)+' '+(h+over)+'" preserveAspectRatio="xMidYMid meet">'+deviceInner(type,{})+'</svg>'
           +   '<div class="tray-meta"><b>'+t.title+'</b>'
           +     '<span>'+(t.freeOnly?'свободное размещение':t.modules+' мод. · '+(t.modules*17.5).toFixed(1)+' мм')+' · '+(KIND_RU[t.kind]||'')+'</span></div>'
-          +   '<span class="stock" title="Количество не ограничено">∞</span>'
+          +   '<span class="stock" title="Количество не ограничено">∞</span><button type="button" class="tray-add" aria-label="Разместить: '+escapeHtml(t.title)+'">+</button>'
           + '</div>';
   });
   const specialTitles={inbox:'Клеммная коробка XT1',pushbutton:'Кнопочный пост',motor:'Асинхронный двигатель',dcmotor:'Двигатель постоянного тока',multimeter:'Цифровой мультиметр',clamp:'Токовые клещи',panel:'Монтажный щит'};
@@ -5381,7 +5622,7 @@ function renderTray(){
     if(!unlimitedSpecials[key]&&state.special[key])return;
     html+='<div class="tray-item tray-special" data-special="'+key+'">'
         +specialTrayPreview(key)+'<div class="tray-meta"><b>'+specialTitles[key]+'</b>'
-        +'<span>Перетащите на рабочее поле</span></div><span class="stock">'+(unlimitedSpecials[key]?'∞':'×1')+'</span></div>';
+        +'<span>Перетащите на рабочее поле</span></div><span class="stock">'+(unlimitedSpecials[key]?'∞':'×1')+'</span><button type="button" class="tray-add" aria-label="Разместить: '+specialTitles[key]+'">+</button></div>';
   });
   box.innerHTML = html || '<div class="empty-tray">Все аппараты установлены на рейке</div>';
 }
@@ -5553,22 +5794,156 @@ function renderAll(){
    ЛОКАЛЬНЫЕ ПРЕСЕТЫ СХЕМ
    ============================================================ */
 const PRESET_STORAGE_KEY = 'ad-trainer-schemes-v1';
+let presetFolderHandle=null,presetFolderRefresh=null,presetFolderNeedsPermission=false,presetFolderPersistenceFailed=false;
+let folderPresets=presetFilesToPresets(window.ELECTROSIM_PRESET_CATALOG||[]);
 function presetStatus(text, error){
   const el=document.getElementById('presetStatus');
   if(!el) return;
   el.textContent=text;
   el.style.color=error?'#ff9a9a':'#93a2b4';
 }
-function readPresets(){
+function readBrowserPresets(){
   try{
     const raw=localStorage.getItem(PRESET_STORAGE_KEY);
     const list=raw?JSON.parse(raw):[];
     return Array.isArray(list)?list:[];
   }catch(e){ presetStatus('Локальное хранилище браузера недоступно.',true); return []; }
 }
+function readPresets(){return readBrowserPresets().concat(folderPresets);}
 function writePresets(list){
-  try{ localStorage.setItem(PRESET_STORAGE_KEY,JSON.stringify(list)); return true; }
+  try{ localStorage.setItem(PRESET_STORAGE_KEY,JSON.stringify(list.filter(function(p){return !p._folderFile;}))); return true; }
   catch(e){ presetStatus('Не удалось сохранить: локальное хранилище недоступно или заполнено.',true); return false; }
+}
+function presetsFromData(data){
+  let incoming=[];
+  if(data&&data.format==='ad-trainer-schemes'&&Array.isArray(data.presets))incoming=data.presets;
+  else if(data&&data.format==='ad-trainer-scheme'&&data.preset)incoming=[data.preset];
+  else if(data&&data.state)incoming=[data];
+  return incoming.filter(function(p){return p&&p.state&&Array.isArray(p.state.devices)&&Array.isArray(p.state.wires)
+    &&p.state.devices.every(function(d){return d&&typeof d.type==='string'&&Object.prototype.hasOwnProperty.call(TYPES,d.type);})
+    &&p.state.wires.every(function(w){return w&&w.a&&w.b&&w.a.devId!==undefined&&w.b.devId!==undefined&&typeof w.a.key==='string'&&typeof w.b.key==='string';});});
+}
+function presetFilesToPresets(files){
+  const list=[];
+  if(!Array.isArray(files))return list;
+  files.forEach(function(entry){
+    if(!entry||typeof entry.file!=='string')return;
+    presetsFromData(entry.data).forEach(function(source,index){
+      const p=JSON.parse(JSON.stringify(source));
+      p.id='folder:'+encodeURIComponent(entry.file)+':'+encodeURIComponent(String(p.id||index))+':'+index;
+      p.name=String(p.name||entry.file.replace(/\.ad-scheme\.json$|\.json$/i,''));
+      p.updated=Number(p.updated)||Number(entry.modified)||0;
+      p._folderFile=entry.file;
+      p.state.wires.forEach(function(w){delete w.previewShape;});
+      list.push(p);
+    });
+  });
+  return list;
+}
+function presetFolderStatus(message,error){
+  const el=document.getElementById('presetFolderStatus');
+  if(el){el.textContent=message;el.style.color=error?'#ff9a9a':'#93a2b4';}
+  const button=document.getElementById('presetFolderConnect');
+  if(button)button.textContent=presetFolderNeedsPermission?'Разрешить доступ к папке presets':presetFolderHandle?'Сменить папку presets':'Подключить папку presets';
+}
+function presetFolderDb(){
+  return new Promise(function(resolve,reject){
+    if(typeof indexedDB==='undefined'){reject(new Error('indexedDB'));return;}
+    const request=indexedDB.open('electrosim-preset-folder',1);
+    request.onupgradeneeded=function(){request.result.createObjectStore('handles');};
+    request.onsuccess=function(){resolve(request.result);};
+    request.onerror=function(){reject(request.error);};
+    request.onblocked=function(){reject(new Error('blocked'));};
+  });
+}
+async function readPresetFolderHandle(){
+  const db=await presetFolderDb();
+  return new Promise(function(resolve,reject){
+    const request=db.transaction('handles','readonly').objectStore('handles').get('presets');
+    request.onsuccess=function(){db.close();resolve(request.result||null);};
+    request.onerror=function(){db.close();reject(request.error);};
+  });
+}
+async function storePresetFolderHandle(handle){
+  const db=await presetFolderDb();
+  return new Promise(function(resolve,reject){
+    const transaction=db.transaction('handles','readwrite');
+    transaction.objectStore('handles').put(handle,'presets');
+    transaction.oncomplete=function(){db.close();resolve();};
+    transaction.onerror=transaction.onabort=function(){db.close();reject(transaction.error);};
+  });
+}
+async function scanPresetDirectory(handle){
+  const entries=[],ignored=[];
+  for await(const entry of handle.values()){
+    if(entry.kind!=='file'||!/\.json$/i.test(entry.name))continue;
+    try{
+      const file=await entry.getFile(),data=JSON.parse((await file.text()).replace(/^\uFEFF/,''));
+      if(!presetsFromData(data).length)throw new Error('format');
+      entries.push({file:entry.name,modified:file.lastModified,data:data});
+    }catch(error){
+      if(error.name==='NotAllowedError')throw error;
+      ignored.push(entry.name);
+    }
+  }
+  entries.sort(function(a,b){return a.file.localeCompare(b.file,'ru');});
+  return {presets:presetFilesToPresets(entries),ignored:ignored};
+}
+async function refreshPresetFolder(){
+  if(!presetFolderHandle)return;
+  if(presetFolderRefresh)return presetFolderRefresh;
+  const handle=presetFolderHandle;
+  presetFolderRefresh=(async function(){
+    try{
+      if(await handle.queryPermission({mode:'read'})!=='granted'){
+        presetFolderNeedsPermission=true;
+        presetFolderStatus('Для автоматического чтения папки разрешите доступ к ней.',false);return;
+      }
+      const scanned=await scanPresetDirectory(handle);
+      if(handle!==presetFolderHandle)return;
+      presetFolderNeedsPermission=false;
+      if(JSON.stringify(scanned.presets)!==JSON.stringify(folderPresets)){
+        folderPresets=scanned.presets;renderPresetList();
+      }
+      presetFolderStatus('Папка '+handle.name+': схем '+folderPresets.length+'. Список обновляется автоматически.'+(scanned.ignored.length?' Пропущено файлов: '+scanned.ignored.length+'.':'')+(presetFolderPersistenceFailed?' При следующем открытии подключите папку снова.':''),!!scanned.ignored.length);
+    }catch(error){
+      presetFolderNeedsPermission=error.name==='NotAllowedError';
+      presetFolderStatus(presetFolderNeedsPermission?'Доступ к папке отозван. Разрешите его снова.':'Не удалось прочитать папку. Проверьте, что она доступна, или выберите её снова.',true);
+    }
+  })();
+  try{await presetFolderRefresh;}finally{presetFolderRefresh=null;}
+}
+async function connectPresetFolder(){
+  if(typeof window.showDirectoryPicker!=='function'){
+    presetFolderStatus('Этот браузер не поддерживает автоматическое чтение папок. Подключите папку в Chrome или Edge; импорт отдельных файлов доступен здесь.',true);return;
+  }
+  try{
+    if(presetFolderHandle&&presetFolderNeedsPermission){
+      if(await presetFolderHandle.requestPermission({mode:'read'})!=='granted'){
+        presetFolderStatus('Доступ не предоставлен. Схемы из браузера и каталога остаются доступны.',true);return;
+      }
+    }else{
+      const selected=await window.showDirectoryPicker({id:'electrosim-presets',mode:'read'});
+      let handle=selected;
+      if(selected.name.toLowerCase()!=='presets'){
+        // Можно выбрать и всю папку проекта: находим в ней presets.
+        for await(const child of selected.values())if(child.kind==='directory'&&child.name.toLowerCase()==='presets'){handle=child;break;}
+      }
+      presetFolderHandle=handle;
+      try{await storePresetFolderHandle(handle);presetFolderPersistenceFailed=false;}catch(error){presetFolderPersistenceFailed=true;}
+    }
+    if(presetFolderRefresh)await presetFolderRefresh;
+    await refreshPresetFolder();
+  }catch(error){if(error.name!=='AbortError')presetFolderStatus('Не удалось подключить папку. Попробуйте выбрать presets ещё раз.',true);}
+}
+async function initPresetFolder(){
+  presetFolderStatus('Из папки presets подключено схем: '+folderPresets.length+'. Для чтения новых файлов подключите папку.');
+  if(typeof window.showDirectoryPicker!=='function')return;
+  const originalHandle=presetFolderHandle;
+  try{
+    const saved=await readPresetFolderHandle();
+    if(saved&&presetFolderHandle===originalHandle){presetFolderHandle=saved;await refreshPresetFolder();}
+  }catch(error){/* Отсутствие разрешения или IndexedDB не мешает обычным схемам. */}
 }
 function escapeHtml(value){
   return String(value).replace(/[&<>"']/g,function(ch){
@@ -5621,13 +5996,23 @@ function schemeSnapshot(name,id){
 function renderPresetList(selectedId){
   const box=document.getElementById('presetList');
   if(!box) return;
-  const list=readPresets().sort(function(a,b){return (b.updated||0)-(a.updated||0);});
-  if(!list.length){ box.innerHTML='<option disabled>Нет сохранённых схем</option>'; return; }
-  box.innerHTML=list.map(function(p){
+  const keepSelected=selectedId||box.value;
+  const local=readBrowserPresets().sort(function(a,b){return (b.updated||0)-(a.updated||0);});
+  const library=folderPresets.slice().sort(function(a,b){return a.name.localeCompare(b.name,'ru');});
+  const list=library.concat(local);
+  if(!list.length){ box.innerHTML='<option disabled>Нет сохранённых схем</option>';box.value='';updatePresetDeleteButton();return; }
+  function option(p){
     const dt=p.updated?new Date(p.updated).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
-    return '<option value="'+p.id+'">'+escapeHtml(p.name)+(dt?' · '+dt:'')+'</option>';
-  }).join('');
-  if(selectedId) box.value=selectedId;
+    return '<option value="'+escapeHtml(p.id)+'"'+(p._folderFile?' title="'+escapeHtml(p._folderFile)+'"':'')+'>'+escapeHtml(p.name)+(dt?' · '+dt:'')+'</option>';
+  }
+  box.innerHTML=(library.length?'<optgroup label="Из папки presets">'+library.map(option).join('')+'</optgroup>':'')
+    +(local.length?'<optgroup label="Сохранены в браузере">'+local.map(option).join('')+'</optgroup>':'');
+  box.value=list.some(function(p){return p.id===keepSelected;})?keepSelected:list[0].id;
+  updatePresetDeleteButton();
+}
+function updatePresetDeleteButton(){
+  const button=document.getElementById('presetDelete'),selected=selectedPreset();
+  if(button){button.disabled=!!(selected&&selected._folderFile);button.title=selected&&selected._folderFile?'Для удаления этой схемы удалите её файл из папки presets.':'';}
 }
 function selectedPreset(){
   const box=document.getElementById('presetList');
@@ -5637,7 +6022,7 @@ function selectedPreset(){
 function saveCurrentPreset(){
   const input=document.getElementById('presetName');
   let name=(input&&input.value?input.value:'').trim();
-  const list=readPresets();
+  const list=readBrowserPresets();
   if(!name) name='Схема '+(list.length+1);
   const old=list.filter(function(p){return String(p.name).toLowerCase()===name.toLowerCase();})[0]||null;
   const snap=schemeSnapshot(name,old&&old.id);
@@ -5785,8 +6170,9 @@ METER.x=875;METER.y=1080;METER.redX=1033;METER.redY=1022;METER.blackX=947;METER.
 function deleteSelectedPreset(){
   const p=selectedPreset();
   if(!p){presetStatus('Выберите схему для удаления.',true);return;}
+  if(p._folderFile){presetStatus('Чтобы убрать эту схему, удалите её файл из папки presets.');return;}
   if(typeof window.confirm==='function'&&!window.confirm('Удалить сохранённую схему «'+p.name+'»?'))return;
-  const next=readPresets().filter(function(x){return x.id!==p.id;});
+  const next=readBrowserPresets().filter(function(x){return x.id!==p.id;});
   if(!writePresets(next))return;
   renderPresetList();presetStatus('Схема «'+p.name+'» удалена.');
 }
@@ -5828,19 +6214,16 @@ function importPresetFile(file){
   const reader=new FileReader();
   reader.onload=function(){
     try{
-      const data=JSON.parse(String(reader.result||''));
-      let incoming=[];
-      if(data&&data.format==='ad-trainer-schemes'&&Array.isArray(data.presets))incoming=data.presets;
-      else if(data&&data.format==='ad-trainer-scheme'&&data.preset)incoming=[data.preset];
-      else if(data&&data.state)incoming=[data];
-      incoming=incoming.filter(function(p){return p&&p.state&&Array.isArray(p.state.devices)&&Array.isArray(p.state.wires);});
+      const data=JSON.parse(String(reader.result||'').replace(/^\uFEFF/,''));
+      const incoming=presetsFromData(data);
       if(!incoming.length)throw new Error('format');
-      const list=readPresets(),now=Date.now();
+      const list=readBrowserPresets(),now=Date.now();
       incoming.forEach(function(src,i){
         const p=JSON.parse(JSON.stringify(src));
         p.id='scheme-import-'+now.toString(36)+'-'+i;
         p.name=uniqueImportedName(p.name,list);
         p.updated=now+i;
+        delete p._folderFile;
         (p.state.wires||[]).forEach(function(w){delete w.previewShape;});
         list.push(p);
       });
@@ -5875,6 +6258,13 @@ document.getElementById('presetSave').addEventListener('click',saveCurrentPreset
 document.getElementById('presetLoad').addEventListener('click',loadSelectedPreset);
 document.getElementById('presetDelete').addEventListener('click',deleteSelectedPreset);
 document.getElementById('presetList').addEventListener('dblclick',loadSelectedPreset);
+document.getElementById('presetList').addEventListener('change',updatePresetDeleteButton);
+document.getElementById('presetFolderConnect').addEventListener('click',connectPresetFolder);
+const presetDetails=document.getElementById('presetList').closest('details');
+if(presetDetails)presetDetails.addEventListener('toggle',function(){if(presetDetails.open)refreshPresetFolder();});
+if(typeof window.addEventListener==='function')window.addEventListener('focus',refreshPresetFolder);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)refreshPresetFolder();});
+setInterval(function(){if(!document.hidden&&presetFolderHandle)refreshPresetFolder();},15000);
 document.getElementById('presetExport').addEventListener('click',exportSelectedPreset);
 document.getElementById('presetExportAll').addEventListener('click',exportAllPresets);
 document.getElementById('presetImportFile').addEventListener('change',function(e){
@@ -5938,9 +6328,14 @@ function initWireDefaults(){
   });
   [shape,color].forEach(function(menu){
     if(!menu)return;
-    menu.addEventListener('mouseenter',function(){menu.classList.add('open');});
-    menu.addEventListener('mouseleave',function(){menu.classList.remove('open');});
+    const trigger=menu.querySelector('.wire-default-trigger');
+    if(trigger){trigger.setAttribute('aria-expanded','false');trigger.addEventListener('click',function(){const open=!menu.classList.contains('open');[shape,color].forEach(function(other){if(other)other.classList.remove('open');});menu.classList.toggle('open',open);trigger.setAttribute('aria-expanded',String(open));});}
+    menu.addEventListener('mouseenter',function(){if(!document.body.classList.contains('touch-input'))menu.classList.add('open');});
+    menu.addEventListener('mouseleave',function(){if(!document.body.classList.contains('touch-input'))menu.classList.remove('open');});
   });
+  const tools=document.querySelector('.wire-defaults'),toggle=document.getElementById('wireToolsToggle');
+  if(toggle&&tools)toggle.addEventListener('click',function(){const open=!tools.classList.contains('expanded');tools.classList.toggle('expanded',open);toggle.setAttribute('aria-expanded',String(open));});
+  document.addEventListener('pointerdown',function(e){if(e.target.closest('.wire-defaults'))return;[shape,color].forEach(function(menu){if(menu){menu.classList.remove('open');const b=menu.querySelector('.wire-default-trigger');if(b)b.setAttribute('aria-expanded','false');}});});
   refresh();
 }
 function initTerminalGuides(){
@@ -6250,6 +6645,7 @@ initialState();
 resetView();
 renderAll();
 renderPresetList();
+initPresetFolder();
 initLogPanel();
 log('Тренажёр запущен: на сцене монтажный щит с двумя DIN-рейками и встроенным вводом XT1 — 3×380 В, N и PE.', 'info');
 

@@ -1,13 +1,14 @@
 /* Сборка однофайловой версии стенда: index.html + styles.css + app.js → stand-1file.html
-   Запуск:  node tools/build.js "D:\3D\Стенд АД"                                        */
+   Запуск: node tools/build.js                                        */
 const fs = require('fs');
 const path = require('path');
 const dir = process.argv[2] || path.join(__dirname, '..');
 const p = f => path.join(dir, f);
+require('./update-presets').writePresetCatalog(dir);
 
 let html = fs.readFileSync(p('index.html'), 'utf8');
 const css  = fs.readFileSync(p('styles.css'), 'utf8');
-const js   = fs.readFileSync(p('app.js'), 'utf8');
+const js   = fs.readFileSync(p('presets/catalog.js'), 'utf8') + '\n' + fs.readFileSync(p('app.js'), 'utf8');
 
 if (html.indexOf('<link rel="stylesheet" href="styles.css">') < 0 ||
     html.indexOf('<script src="app.js"></script>') < 0){
@@ -32,6 +33,7 @@ if (/<\/style/i.test(css)){
 
 html = html.replace('<link rel="stylesheet" href="styles.css">',
                     inline('<style>\n' + css + '\n</style>'));
+html = html.replace('<script src="presets/catalog.js"></script>', '');
 html = html.replace('<script src="app.js"></script>',
                     inline('<script>\n' + js + '\n</script>'));
 
